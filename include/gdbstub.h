@@ -2,6 +2,7 @@
 #define GDBSTUB
 
 #include <stdbool.h>
+#include "conn.h"
 
 typedef enum {
     EVENT_NONE,
@@ -17,9 +18,7 @@ struct target_ops {
 };
 
 typedef struct {
-    int socket_fd;
-    int listen_fd;
-
+    conn_t conn;
     struct target_ops *ops;
 } gdbstub_t;
 
