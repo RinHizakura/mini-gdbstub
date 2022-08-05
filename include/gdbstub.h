@@ -12,16 +12,18 @@ typedef enum {
     ACT_SHUTDOWN,
 } action_t;
 
-typedef struct gdbstub gdbstub_t;
-typedef action_t (*handle_event_func)(event_t e, void *args);
-struct gdbstub {
+struct target_ops {
+    action_t (*handle_event)(event_t e, void *args);
+};
+
+typedef struct {
     int socket_fd;
     int listen_fd;
 
-    handle_event_func event_cb;
-};
+    struct target_ops *ops;
+} gdbstub_t;
 
-bool gdbstub_init(gdbstub_t *gdbstub, handle_event_func event_cb, char *s);
+bool gdbstub_init(gdbstub_t *gdbstub, struct target_ops *ops, char *s);
 bool gdbstub_run(gdbstub_t *gdbstub, void *args);
 void gdbstub_close(gdbstub_t *gdbstub);
 

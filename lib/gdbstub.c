@@ -6,12 +6,12 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
-bool gdbstub_init(gdbstub_t *gdbstub, handle_event_func event_cb, char *s)
+bool gdbstub_init(gdbstub_t *gdbstub, struct target_ops *ops, char *s)
 {
-    if (s == NULL || event_cb == NULL)
+    if (s == NULL || ops == NULL)
         return false;
 
-    gdbstub->event_cb = event_cb;
+    gdbstub->ops = ops;
 
     // This is a naive implementation to parse the string
     char *addr_str = strdup(s);
@@ -57,7 +57,7 @@ bool gdbstub_run(gdbstub_t *gdbstub, void *args)
 {
     while (true) {
         event_t e = EVENT_NONE;
-        action_t act = gdbstub->event_cb(e, args);
+        action_t act = gdbstub->ops->handle_event(e, args);
 
         switch (act) {
         case ACT_SHUTDOWN:

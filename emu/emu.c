@@ -6,7 +6,7 @@ struct emu {
     gdbstub_t gdbstub;
 };
 
-action_t emu_event_cb(event_t e, void *args)
+action_t emu_handle_event(event_t e, void *args)
 {
     struct emu *emu = (struct emu *) args;
     if (e == EVENT_NONE)
@@ -15,10 +15,14 @@ action_t emu_event_cb(event_t e, void *args)
     return ACT_CONT;
 }
 
+struct target_ops emu_ops = {
+    .handle_event = emu_handle_event,
+};
+
 int main()
 {
     struct emu emu;
-    if (!gdbstub_init(&emu.gdbstub, emu_event_cb, "127.0.0.1:1234")) {
+    if (!gdbstub_init(&emu.gdbstub, &emu_ops, "127.0.0.1:1234")) {
         fprintf(stderr, "Fail to create socket.\n");
         return -1;
     }
