@@ -1,4 +1,4 @@
-CFLAGS = -Iinclude -Wall -Wextra #-Werror
+CFLAGS = -Iinclude -Wall -Wextra -g#-Werror
 LDFLAGS = -Wl,-rpath="$(CURDIR)" -L. -ldl -lgdbstub
 
 CURDIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))

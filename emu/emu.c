@@ -1,3 +1,4 @@
+#include <stdio.h>
 #include "gdbstub.h"
 
 struct emu {
@@ -8,7 +9,14 @@ struct emu {
 int main()
 {
     struct emu emu;
-    gdbstub_init(&emu.gdbstub);
+    if (!gdbstub_init(&emu.gdbstub, "127.0.0.1:1234")) {
+        fprintf(stderr, "Fail to create socket.\n");
+        return -1;
+    }
+
+    printf("Init done.\n");
+
+    gdbstub_close(&emu.gdbstub);
 
     return 0;
 }
