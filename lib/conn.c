@@ -44,11 +44,17 @@ fail:
 
 void conn_recv(conn_t *conn)
 {
-    while (socket_readable(conn->socket_fd, 0)) {
+    static int i = 0;
+
+    /* TODO: read a full GDB packet and return to handle it */
+    while (socket_readable(conn->socket_fd, -1)) {
         char c;
-        if (read(conn->socket_fd, &c, 1) == -1)
+        int nread = read(conn->socket_fd, &c, 1);
+        if (nread == -1)
             break;
-        printf("c = %c\n", c);
+
+        if (nread > 0)
+            printf("%d: c = %c\n", i++, c);
     }
 }
 

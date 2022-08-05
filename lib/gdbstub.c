@@ -39,6 +39,8 @@ bool gdbstub_init(gdbstub_t *gdbstub, struct target_ops *ops, char *s)
 bool gdbstub_run(gdbstub_t *gdbstub, void *args)
 {
     while (true) {
+        conn_recv(&gdbstub->conn);
+
         event_t e = EVENT_NONE;
         action_t act = gdbstub->ops->handle_event(e, args);
 
