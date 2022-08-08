@@ -1,4 +1,5 @@
 #include "gdbstub.h"
+#include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -36,10 +37,26 @@ bool gdbstub_init(gdbstub_t *gdbstub, struct target_ops *ops, char *s)
     return true;
 }
 
+void gdbstub_process_packet(gdbstub_t *gdbstub, packet_t *inpkt)
+{
+    assert(inpkt->start[0] == '$');
+    uint8_t request = inpkt->start[1];
+
+    switch (request) {
+    default:
+        conn_send_pktstr(&gdbstub->conn, PKTSTR_EMPTY);
+        break;
+    }
+}
+
 bool gdbstub_run(gdbstub_t *gdbstub, void *args)
 {
     while (true) {
-        packet_t pkt = conn_recv_packet(&gdbstub->conn);
+        /* UNSAFE! the packet can only be valid in a limited lifetime
+         * since it is a referenced of packet buffer */
+        packet_t *pkt = conn_recv_packet(&gdbstub->conn);
+        gdbstub_process_packet(gdbstub, pkt);
+        free(pkt);
 
         event_t e = EVENT_NONE;
         action_t act = gdbstub->ops->handle_event(e, args);

@@ -1,5 +1,6 @@
 #include "packet.h"
 #include <assert.h>
+#include <stdlib.h>
 #include <string.h>
 
 static void pktbuf_clear(pktbuf_t *pktbuf)
@@ -54,10 +55,13 @@ bool pktbuf_is_complete(pktbuf_t *pktbuf)
     return true;
 }
 
-packet_t pktbuf_top_packet(pktbuf_t *pktbuf)
+packet_t *pktbuf_top_packet(pktbuf_t *pktbuf)
 {
     if (pktbuf->end_pos == NULL)
         return NULL;
 
-    return pktbuf->data;
+    packet_t *pkt = malloc(sizeof(packet_t));
+    pkt->start = pktbuf->data;
+    pkt->end = pktbuf->end_pos;
+    return pkt;
 }

@@ -5,9 +5,15 @@
 #include <stdint.h>
 #include <unistd.h>
 
+#define PKTSTR_ACK "+"
+#define PKTSTR_EMPTY "$#00"
+
 #define MAX_PACKET_SIZE (0x200)
 
-typedef uint8_t *packet_t;
+typedef struct {
+    uint8_t *start;
+    uint8_t *end;
+} packet_t;
 
 /* A naive packet buffer: maintain a big array to fill the packet */
 typedef struct {
@@ -19,5 +25,6 @@ typedef struct {
 void pktbuf_init(pktbuf_t *pktbuf);
 void pktbuf_fill(pktbuf_t *pktbuf, uint8_t *buf, ssize_t len);
 bool pktbuf_is_complete(pktbuf_t *pktbuf);
-packet_t pktbuf_top_packet(pktbuf_t *pktbuf);
+packet_t *pktbuf_top_packet(pktbuf_t *pktbuf);
+
 #endif

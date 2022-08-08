@@ -18,7 +18,6 @@ static bool socket_readable(int socket_fd, int timeout)
 bool conn_init(conn_t *conn, char *addr_str, int port)
 {
     pktbuf_init(&conn->in);
-    pktbuf_init(&conn->out);
 
     conn->listen_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (conn->listen_fd < 0)
@@ -45,7 +44,7 @@ fail:
     return false;
 }
 
-packet_t conn_recv_packet(conn_t *conn)
+packet_t *conn_recv_packet(conn_t *conn)
 {
     uint8_t buf[4096];
 
@@ -59,7 +58,14 @@ packet_t conn_recv_packet(conn_t *conn)
         pktbuf_fill(&conn->in, buf, nread);
     }
 
+    conn_send_pktstr(conn, PKTSTR_ACK);
     return pktbuf_top_packet(&conn->in);
+}
+
+bool conn_send_pktstr(conn_t *conn, char *pktstr)
+{
+    /* TODO */
+    return true;
 }
 
 void conn_close(conn_t *conn)
