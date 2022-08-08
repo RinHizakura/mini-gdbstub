@@ -2,17 +2,28 @@
 #include <arpa/inet.h>
 #include <poll.h>
 #include <stdio.h>
+#include <string.h>
 #include <sys/socket.h>
 #include <unistd.h>
 
-static bool socket_readable(int socket_fd, int timeout)
+static bool socket_poll(int socket_fd, int timeout, int events)
 {
     struct pollfd pfd = (struct pollfd){
         .fd = socket_fd,
-        .events = POLLIN,
+        .events = events,
     };
 
-    return (poll(&pfd, 1, timeout) > 0) && (pfd.revents & POLLIN);
+    return (poll(&pfd, 1, timeout) > 0) && (pfd.revents & events);
+}
+
+static bool socket_readable(int socket_fd, int timeout)
+{
+    return socket_poll(socket_fd, timeout, POLLIN);
+}
+
+static bool socket_writable(int socket_fd, int timeout)
+{
+    return socket_poll(socket_fd, timeout, POLLOUT);
 }
 
 bool conn_init(conn_t *conn, char *addr_str, int port)
@@ -64,7 +75,12 @@ packet_t *conn_recv_packet(conn_t *conn)
 
 bool conn_send_pktstr(conn_t *conn, char *pktstr)
 {
-    /* TODO */
+    size_t len = strlen(pktstr);
+
+    while (len > 0 && socket_writable(conn->socket_fd, -1)) {
+        ssize_t nwrite = write(conn->socket_fd, pktstr, len);
+        /* TODO */
+    }
     return true;
 }
 
