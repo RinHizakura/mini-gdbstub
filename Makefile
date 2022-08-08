@@ -1,4 +1,4 @@
-CFLAGS = -Iinclude -Wall -Wextra -g#-Werror
+CFLAGS = -Iinclude -Wall -Wextra -MMD -g#-Werror
 LDFLAGS = -Wl,-rpath="$(CURDIR)" -L. -ldl -lgdbstub
 
 CURDIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
@@ -44,5 +44,6 @@ clean:
 	$(RM) $(COBJ)
 	$(RM) $(TESTS)
 	$(RM) $(LIBGDBSTUB)
+	$(RM) $(OUT)/*.d
 
 -include $(OUT)/*.d
