@@ -4,7 +4,7 @@
 #include <stdint.h>
 #include <unistd.h>
 
-#define MAX_PACKET_SIZE (0x4000)
+#define MAX_PACKET_SIZE (0x200)
 
 /* A naive packet buffer: maintain a big array to fill the packet */
 struct packet {
@@ -12,5 +12,6 @@ struct packet {
     uint8_t data[MAX_PACKET_SIZE];
 };
 
+void packet_init(struct packet *pkt);
 void packet_fill(struct packet *pkt, uint8_t *buf, ssize_t len);
 #endif

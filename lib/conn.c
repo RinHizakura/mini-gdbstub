@@ -17,6 +17,9 @@ static bool socket_readable(int socket_fd, int timeout)
 
 bool conn_init(conn_t *conn, char *addr_str, int port)
 {
+    packet_init(&conn->in);
+    packet_init(&conn->out);
+
     conn->listen_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (conn->listen_fd < 0)
         return false;
