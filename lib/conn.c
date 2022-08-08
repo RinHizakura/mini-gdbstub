@@ -50,13 +50,17 @@ void conn_recv(conn_t *conn)
     uint8_t buf[4096];
 
     /* TODO: read a full GDB packet and return to handle it */
-    while (socket_readable(conn->socket_fd, -1)) {
+    while (!packet_is_complete(&conn->in) &&
+           socket_readable(conn->socket_fd, -1)) {
         ssize_t nread = read(conn->socket_fd, buf, sizeof(buf));
         if (nread == -1)
             break;
 
         packet_fill(&conn->in, buf, nread);
     }
+
+    conn->in.data[conn->in.size] = 0;
+    printf("packet %s\n", conn->in.data);
 }
 
 void conn_close(conn_t *conn)
