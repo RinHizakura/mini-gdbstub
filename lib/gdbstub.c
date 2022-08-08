@@ -55,6 +55,10 @@ bool gdbstub_run(gdbstub_t *gdbstub, void *args)
         /* UNSAFE! the packet can only be valid in a limited lifetime
          * since it is a referenced of packet buffer */
         packet_t *pkt = conn_recv_packet(&gdbstub->conn);
+#ifdef DEBUG
+        *(pkt->end + 1) = 0;
+        printf("packet = %s\n", pkt->start);
+#endif
         gdbstub_process_packet(gdbstub, pkt);
         free(pkt);
 
