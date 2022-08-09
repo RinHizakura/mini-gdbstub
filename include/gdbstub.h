@@ -19,6 +19,7 @@ struct target_ops {
 
 typedef struct {
     conn_t conn;
+    pktbuf_t in;
     struct target_ops *ops;
 } gdbstub_t;
 

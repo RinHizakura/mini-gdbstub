@@ -1,5 +1,6 @@
 #include "conn.h"
 #include <arpa/inet.h>
+#include <assert.h>
 #include <poll.h>
 #include <stdio.h>
 #include <string.h>
@@ -28,8 +29,6 @@ static bool socket_writable(int socket_fd, int timeout)
 
 bool conn_init(conn_t *conn, char *addr_str, int port)
 {
-    pktbuf_init(&conn->in);
-
     conn->listen_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (conn->listen_fd < 0)
         return false;
@@ -55,33 +54,68 @@ fail:
     return false;
 }
 
-packet_t *conn_recv_packet(conn_t *conn)
+void conn_recv_packet(conn_t *conn, pktbuf_t *pktbuf)
 {
     uint8_t buf[4096];
 
     /* TODO: read a full GDB packet and return to handle it */
-    while (!pktbuf_is_complete(&conn->in) &&
+    while (!pktbuf_is_complete(pktbuf) &&
            socket_readable(conn->socket_fd, -1)) {
         ssize_t nread = read(conn->socket_fd, buf, sizeof(buf));
         if (nread == -1)
             break;
 
-        pktbuf_fill(&conn->in, buf, nread);
+        pktbuf_fill(pktbuf, buf, nread);
     }
 
-    conn_send_pktstr(conn, PKTSTR_ACK);
-    return pktbuf_top_packet(&conn->in);
+    conn_send_str(conn, STR_ACK);
 }
 
-bool conn_send_pktstr(conn_t *conn, char *pktstr)
+void conn_send_str(conn_t *conn, char *str)
 {
-    size_t len = strlen(pktstr);
+    size_t len = strlen(str);
 
     while (len > 0 && socket_writable(conn->socket_fd, -1)) {
-        ssize_t nwrite = write(conn->socket_fd, pktstr, len);
-        /* TODO */
+        ssize_t nwrite = write(conn->socket_fd, str, len);
+        if (nwrite == -1)
+            break;
+        len -= nwrite;
     }
-    return true;
+}
+
+static uint8_t compute_checksum(char *buf, size_t len)
+{
+    uint8_t csum = 0;
+    for (size_t i = 0; i < len; ++i)
+        csum += buf[i];
+    return csum;
+}
+
+void conn_send_pktstr(conn_t *conn, char *pktstr)
+{
+    char packet[MAX_PACKET_SIZE];
+    size_t len = strlen(pktstr);
+
+    /* 2: '$' + '#'
+     * 4: checksum digits(maximum)
+     * 1: '\0' */
+    assert(len + 2 + 4 + 1 < MAX_PACKET_SIZE);
+
+    packet[0] = '$';
+    memcpy(packet + 1, pktstr, len);
+    packet[len + 1] = '#';
+
+    char csum_str[4];
+    uint8_t csum = compute_checksum(pktstr, len);
+    size_t csum_len = snprintf(csum_str, sizeof(csum_str) - 1, "%02x", csum);
+    memcpy(packet + len + 2, csum_str, csum_len);
+    packet[len + 2 + csum_len] = '\0';
+
+    //#ifdef DEBUG
+    printf("send packet = %s,", packet);
+    printf(" checksum = %d\n", csum);
+    //#endif
+    conn_send_str(conn, packet);
 }
 
 void conn_close(conn_t *conn)

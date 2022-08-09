@@ -5,8 +5,7 @@
 #include <stdint.h>
 #include <unistd.h>
 
-#define PKTSTR_ACK "+"
-#define PKTSTR_EMPTY "$#00"
+#define STR_ACK "+"
 
 #define MAX_PACKET_SIZE (0x200)
 

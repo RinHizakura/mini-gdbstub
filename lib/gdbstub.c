@@ -10,6 +10,7 @@ bool gdbstub_init(gdbstub_t *gdbstub, struct target_ops *ops, char *s)
         return false;
 
     gdbstub->ops = ops;
+    pktbuf_init(&gdbstub->in);
 
     // This is a naive implementation to parse the string
     char *addr_str = strdup(s);
@@ -44,7 +45,7 @@ void gdbstub_process_packet(gdbstub_t *gdbstub, packet_t *inpkt)
 
     switch (request) {
     default:
-        conn_send_pktstr(&gdbstub->conn, PKTSTR_EMPTY);
+        conn_send_pktstr(&gdbstub->conn, "321");
         break;
     }
 }
@@ -54,16 +55,18 @@ bool gdbstub_run(gdbstub_t *gdbstub, void *args)
     while (true) {
         /* UNSAFE! the packet can only be valid in a limited lifetime
          * since it is a referenced of packet buffer */
-        packet_t *pkt = conn_recv_packet(&gdbstub->conn);
-#ifdef DEBUG
+        conn_recv_packet(&gdbstub->conn, &gdbstub->in);
+        packet_t *pkt = pktbuf_top_packet(&gdbstub->in);
+        //#ifdef DEBUG
         *(pkt->end + 1) = 0;
         printf("packet = %s\n", pkt->start);
-#endif
+        //#endif
         gdbstub_process_packet(gdbstub, pkt);
         free(pkt);
 
         event_t e = EVENT_NONE;
-        action_t act = gdbstub->ops->handle_event(e, args);
+        // action_t act = gdbstub->ops->handle_event(e, args);
+        action_t act = ACT_CONT;
 
         switch (act) {
         case ACT_SHUTDOWN:

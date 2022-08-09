@@ -54,7 +54,7 @@ bool pktbuf_is_complete(pktbuf_t *pktbuf)
 
     /* FIXME: Move end position to the packet checksum. We should
      * read until the checksum instead of assumming that they must exist. */
-    pktbuf->end_pos += 2;
+    pktbuf->end_pos += 1;
     assert(pktbuf->end_pos - pktbuf->data <= pktbuf->size);
     return true;
 }
