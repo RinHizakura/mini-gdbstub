@@ -55,6 +55,9 @@ static void process_query(gdbstub_t *gdbstub, char *payload)
     if (!strcmp(name, "Supported")) {
         /* TODO: We should do handshake correctly */
         conn_send_pktstr(&gdbstub->conn, "PacketSize=512");
+    } else if (!strcmp(name, "Attached")) {
+        /* assume attached to an existing process */
+        conn_send_pktstr(&gdbstub->conn, "1");
     } else {
         conn_send_pktstr(&gdbstub->conn, "");
     }
@@ -71,6 +74,9 @@ static void gdbstub_process_packet(gdbstub_t *gdbstub, packet_t *inpkt)
     switch (request) {
     case 'q':
         process_query(gdbstub, payload);
+        break;
+    case '?':
+        conn_send_pktstr(&gdbstub->conn, "S05");
         break;
     default:
         conn_send_pktstr(&gdbstub->conn, "");
