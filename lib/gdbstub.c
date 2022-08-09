@@ -64,7 +64,7 @@ static void gdbstub_process_packet(gdbstub_t *gdbstub, packet_t *inpkt)
 {
     assert(inpkt->data[0] == '$');
     /* TODO: check the checksum result */
-    *(inpkt->end - CSUM_SIZE) = 0;
+    inpkt->data[inpkt->end_pos - CSUM_SIZE] = 0;
     uint8_t request = inpkt->data[1];
     char *payload = (char *) &inpkt->data[2];
 

@@ -5,7 +5,7 @@
 
 static void pktbuf_clear(pktbuf_t *pktbuf)
 {
-    pktbuf->end_pos = NULL;
+    pktbuf->end_pos = -1;
     pktbuf->size = 0;
 }
 
@@ -47,32 +47,32 @@ bool pktbuf_is_complete(pktbuf_t *pktbuf)
     }
 
     /* check the end of the buffer */
-    pktbuf->end_pos = memchr(pktbuf->data, '#', pktbuf->size);
-
-    if (pktbuf->end_pos == NULL)
+    uint8_t *end_pos_ptr = memchr(pktbuf->data, '#', pktbuf->size);
+    if (end_pos_ptr == NULL)
         return false;
 
     /* FIXME: Move end position to the packet checksum. We should
      * read until the checksum instead of assumming that they must exist. */
-    pktbuf->end_pos += CSUM_SIZE;
-    assert(pktbuf->end_pos - pktbuf->data <= pktbuf->size);
+    pktbuf->end_pos = (end_pos_ptr - pktbuf->data) + CSUM_SIZE;
+    assert(pktbuf->end_pos <= pktbuf->size);
     return true;
 }
 
 packet_t *pktbuf_pop_packet(pktbuf_t *pktbuf)
 {
-    if (pktbuf->end_pos == NULL)
+    if (pktbuf->end_pos == -1)
         return NULL;
 
     /* FIXME: As you can see, we keep moving memory frequently
      * which is not a good practice. */
-    int old_pkt_size = (pktbuf->end_pos - pktbuf->data);
+    int old_pkt_size = pktbuf->end_pos;
     packet_t *pkt = calloc(1, sizeof(packet_t));
     memcpy(pkt->data, pktbuf->data, old_pkt_size);
-    pkt->end = pkt->data + (pktbuf->end_pos - pktbuf->data);
+    pkt->end_pos = pktbuf->end_pos;
 
-    memmove(pktbuf->data, pktbuf->end_pos + 1, pktbuf->size - old_pkt_size);
+    memmove(pktbuf->data, pktbuf->data + old_pkt_size + 1,
+            pktbuf->size - old_pkt_size);
     pktbuf->size -= old_pkt_size;
-    pktbuf->end_pos = NULL;
+    pktbuf->end_pos = -1;
     return pkt;
 }

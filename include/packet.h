@@ -12,13 +12,13 @@
 
 typedef struct {
     uint8_t data[MAX_PACKET_SIZE + 1];
-    uint8_t *end;
+    int end_pos;
 } packet_t;
 
 /* A naive packet buffer: maintain a big array to fill the packet */
 typedef struct {
-    int size;         /* the size for all valid characters in data buffer */
-    uint8_t *end_pos; /* the end position of the first packet in data buffer */
+    int size;    /* the size for all valid characters in data buffer */
+    int end_pos; /* the end position of the first packet in data buffer */
     uint8_t data[MAX_PACKET_SIZE + 1];
 } pktbuf_t;
 
