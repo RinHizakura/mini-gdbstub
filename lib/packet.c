@@ -64,6 +64,8 @@ packet_t *pktbuf_pop_packet(pktbuf_t *pktbuf)
     if (pktbuf->end_pos == NULL)
         return NULL;
 
+    /* FIXME: As you can see, we keep moving memory frequently
+     * which is not a good practice. */
     int old_pkt_size = (pktbuf->end_pos - pktbuf->data);
     packet_t *pkt = malloc(sizeof(packet_t));
     memcpy(pkt->data, pktbuf->data, old_pkt_size);

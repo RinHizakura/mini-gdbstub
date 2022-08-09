@@ -67,6 +67,7 @@ void conn_recv_packet(conn_t *conn, pktbuf_t *pktbuf)
         if (nread == -1)
             break;
 
+        /* FIXME: A redundant moving of data here, which could be refined */
         pktbuf_fill(pktbuf, buf, nread);
     }
 
