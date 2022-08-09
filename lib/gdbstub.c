@@ -4,6 +4,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#define DEBUG
+
 bool gdbstub_init(gdbstub_t *gdbstub, struct target_ops *ops, char *s)
 {
     if (s == NULL || ops == NULL)
@@ -38,14 +40,37 @@ bool gdbstub_init(gdbstub_t *gdbstub, struct target_ops *ops, char *s)
     return true;
 }
 
-void gdbstub_process_packet(gdbstub_t *gdbstub, packet_t *inpkt)
+static void process_query(gdbstub_t *gdbstub, char *payload)
 {
-    assert(inpkt->start[0] == '$');
-    uint8_t request = inpkt->start[1];
+#ifdef DEBUG
+    printf("payload = %s\n", payload);
+#endif
+    char *name = payload;
+    char *args = strchr(payload, ':');
+    if (args) {
+        *args = '\0';
+        args++;
+    }
+
+    if (!strcmp(name, "Supported")) {
+        /* TODO: We should do handshake correctly */
+        conn_send_pktstr(&gdbstub->conn, "PacketSize=512");
+    }
+}
+
+static void gdbstub_process_packet(gdbstub_t *gdbstub, packet_t *inpkt)
+{
+    assert(inpkt->data[0] == '$');
+    *(inpkt->end + 1) = 0;
+    uint8_t request = inpkt->data[1];
+    char *payload = (char *) &inpkt->data[2];
 
     switch (request) {
+    case 'q':
+        process_query(gdbstub, payload);
+        break;
     default:
-        conn_send_pktstr(&gdbstub->conn, "321");
+        conn_send_pktstr(&gdbstub->conn, "");
         break;
     }
 }
@@ -56,11 +81,10 @@ bool gdbstub_run(gdbstub_t *gdbstub, void *args)
         /* UNSAFE! the packet can only be valid in a limited lifetime
          * since it is a referenced of packet buffer */
         conn_recv_packet(&gdbstub->conn, &gdbstub->in);
-        packet_t *pkt = pktbuf_top_packet(&gdbstub->in);
-        //#ifdef DEBUG
-        *(pkt->end + 1) = 0;
-        printf("packet = %s\n", pkt->start);
-        //#endif
+        packet_t *pkt = pktbuf_pop_packet(&gdbstub->in);
+#ifdef DEBUG
+        printf("packet = %s\n", pkt->data);
+#endif
         gdbstub_process_packet(gdbstub, pkt);
         free(pkt);
 

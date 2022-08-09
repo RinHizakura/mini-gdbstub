@@ -10,7 +10,7 @@
 #define MAX_PACKET_SIZE (0x200)
 
 typedef struct {
-    uint8_t *start;
+    uint8_t data[MAX_PACKET_SIZE + 1];
     uint8_t *end;
 } packet_t;
 
@@ -18,12 +18,12 @@ typedef struct {
 typedef struct {
     int size;         /* the size for all valid characters in data buffer */
     uint8_t *end_pos; /* the end position of the first packet in data buffer */
-    uint8_t data[MAX_PACKET_SIZE];
+    uint8_t data[MAX_PACKET_SIZE + 1];
 } pktbuf_t;
 
 void pktbuf_init(pktbuf_t *pktbuf);
 void pktbuf_fill(pktbuf_t *pktbuf, uint8_t *buf, ssize_t len);
 bool pktbuf_is_complete(pktbuf_t *pktbuf);
-packet_t *pktbuf_top_packet(pktbuf_t *pktbuf);
+packet_t *pktbuf_pop_packet(pktbuf_t *pktbuf);
 
 #endif

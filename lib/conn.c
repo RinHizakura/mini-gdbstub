@@ -7,6 +7,8 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+#define DEBUG
+
 static bool socket_poll(int socket_fd, int timeout, int events)
 {
     struct pollfd pfd = (struct pollfd){
@@ -97,7 +99,7 @@ void conn_send_pktstr(conn_t *conn, char *pktstr)
     size_t len = strlen(pktstr);
 
     /* 2: '$' + '#'
-     * 4: checksum digits(maximum)
+     * 2: checksum digits(maximum)
      * 1: '\0' */
     assert(len + 2 + 4 + 1 < MAX_PACKET_SIZE);
 
@@ -108,13 +110,14 @@ void conn_send_pktstr(conn_t *conn, char *pktstr)
     char csum_str[4];
     uint8_t csum = compute_checksum(pktstr, len);
     size_t csum_len = snprintf(csum_str, sizeof(csum_str) - 1, "%02x", csum);
+    assert(csum_len == 2);
     memcpy(packet + len + 2, csum_str, csum_len);
     packet[len + 2 + csum_len] = '\0';
 
-    //#ifdef DEBUG
+#ifdef DEBUG
     printf("send packet = %s,", packet);
     printf(" checksum = %d\n", csum);
-    //#endif
+#endif
     conn_send_str(conn, packet);
 }
 
