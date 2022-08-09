@@ -55,13 +55,16 @@ static void process_query(gdbstub_t *gdbstub, char *payload)
     if (!strcmp(name, "Supported")) {
         /* TODO: We should do handshake correctly */
         conn_send_pktstr(&gdbstub->conn, "PacketSize=512");
+    } else {
+        conn_send_pktstr(&gdbstub->conn, "");
     }
 }
 
 static void gdbstub_process_packet(gdbstub_t *gdbstub, packet_t *inpkt)
 {
     assert(inpkt->data[0] == '$');
-    *(inpkt->end + 1) = 0;
+    /* TODO: check the checksum result */
+    *(inpkt->end - CSUM_SIZE) = 0;
     uint8_t request = inpkt->data[1];
     char *payload = (char *) &inpkt->data[2];
 

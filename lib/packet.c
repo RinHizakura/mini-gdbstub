@@ -54,7 +54,7 @@ bool pktbuf_is_complete(pktbuf_t *pktbuf)
 
     /* FIXME: Move end position to the packet checksum. We should
      * read until the checksum instead of assumming that they must exist. */
-    pktbuf->end_pos += 2;
+    pktbuf->end_pos += CSUM_SIZE;
     assert(pktbuf->end_pos - pktbuf->data <= pktbuf->size);
     return true;
 }
@@ -67,9 +67,9 @@ packet_t *pktbuf_pop_packet(pktbuf_t *pktbuf)
     /* FIXME: As you can see, we keep moving memory frequently
      * which is not a good practice. */
     int old_pkt_size = (pktbuf->end_pos - pktbuf->data);
-    packet_t *pkt = malloc(sizeof(packet_t));
+    packet_t *pkt = calloc(1, sizeof(packet_t));
     memcpy(pkt->data, pktbuf->data, old_pkt_size);
-    pkt->end = pktbuf->end_pos;
+    pkt->end = pkt->data + (pktbuf->end_pos - pktbuf->data);
 
     memmove(pktbuf->data, pktbuf->end_pos + 1, pktbuf->size - old_pkt_size);
     pktbuf->size -= old_pkt_size;

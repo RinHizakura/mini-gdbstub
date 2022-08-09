@@ -102,7 +102,7 @@ void conn_send_pktstr(conn_t *conn, char *pktstr)
     /* 2: '$' + '#'
      * 2: checksum digits(maximum)
      * 1: '\0' */
-    assert(len + 2 + 4 + 1 < MAX_PACKET_SIZE);
+    assert(len + 2 + CSUM_SIZE + 1 < MAX_PACKET_SIZE);
 
     packet[0] = '$';
     memcpy(packet + 1, pktstr, len);
@@ -111,7 +111,7 @@ void conn_send_pktstr(conn_t *conn, char *pktstr)
     char csum_str[4];
     uint8_t csum = compute_checksum(pktstr, len);
     size_t csum_len = snprintf(csum_str, sizeof(csum_str) - 1, "%02x", csum);
-    assert(csum_len == 2);
+    assert(csum_len == CSUM_SIZE);
     memcpy(packet + len + 2, csum_str, csum_len);
     packet[len + 2 + csum_len] = '\0';
 

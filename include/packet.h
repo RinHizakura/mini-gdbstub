@@ -8,6 +8,7 @@
 #define STR_ACK "+"
 
 #define MAX_PACKET_SIZE (0x200)
+#define CSUM_SIZE (2)
 
 typedef struct {
     uint8_t data[MAX_PACKET_SIZE + 1];
