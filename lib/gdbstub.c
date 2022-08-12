@@ -40,6 +40,36 @@ bool gdbstub_init(gdbstub_t *gdbstub, struct target_ops *ops, char *s)
     return true;
 }
 
+/* FIXME: fake register num
+ * - https://github.com/bminor/binutils-gdb/blob/master/gdb/riscv-tdep.h */
+#define ARCH_REG_NUM (1)
+
+static char hexchars[] = "0123456789abcdef";
+static void num_to_str(uint8_t *num, char *str, int bytes)
+{
+    for (int i = 0; i < bytes; i++) {
+        uint8_t ch = *(num + i);
+        *(str + i * 2) = hexchars[ch >> 4];
+        *(str + i * 2 + 1) = hexchars[ch & 0xf];
+    }
+}
+
+static void process_reg_read(gdbstub_t *gdbstub)
+{
+    /* FIXME: yes, lots of memory copy again :( */
+    char packet_str[MAX_PACKET_SIZE];
+
+    uint32_t reg_value;
+    for (int i = 0; i < ARCH_REG_NUM; i++) {
+        // FIXME: this is a fake register value
+        reg_value = 0x12345678;
+        num_to_str((uint8_t *) &reg_value,
+                   packet_str + i * sizeof(reg_value) * 2, sizeof(reg_value));
+    }
+    packet_str[ARCH_REG_NUM * sizeof(reg_value) * 2] = '\0';
+    conn_send_pktstr(&gdbstub->conn, packet_str);
+}
+
 static void process_query(gdbstub_t *gdbstub, char *payload)
 {
 #ifdef DEBUG
@@ -54,7 +84,7 @@ static void process_query(gdbstub_t *gdbstub, char *payload)
 
     if (!strcmp(name, "Supported")) {
         /* TODO: We should do handshake correctly */
-        conn_send_pktstr(&gdbstub->conn, "PacketSize=512");
+        conn_send_pktstr(&gdbstub->conn, "PacketSize=512;qXfer:features:read+");
     } else if (!strcmp(name, "Attached")) {
         /* assume attached to an existing process */
         conn_send_pktstr(&gdbstub->conn, "1");
@@ -72,6 +102,9 @@ static void gdbstub_process_packet(gdbstub_t *gdbstub, packet_t *inpkt)
     char *payload = (char *) &inpkt->data[2];
 
     switch (request) {
+    case 'g':
+        process_reg_read(gdbstub);
+        break;
     case 'q':
         process_query(gdbstub, payload);
         break;
@@ -87,8 +120,6 @@ static void gdbstub_process_packet(gdbstub_t *gdbstub, packet_t *inpkt)
 bool gdbstub_run(gdbstub_t *gdbstub, void *args)
 {
     while (true) {
-        /* UNSAFE! the packet can only be valid in a limited lifetime
-         * since it is a referenced of packet buffer */
         conn_recv_packet(&gdbstub->conn, &gdbstub->in);
         packet_t *pkt = pktbuf_pop_packet(&gdbstub->in);
 #ifdef DEBUG
