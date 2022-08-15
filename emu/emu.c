@@ -10,8 +10,8 @@ struct emu {
 action_t emu_cont(void *args)
 {
     struct emu *emu = (struct emu *) args;
-    // do somethig here......
-    return ACT_SHUTDOWN;
+    emu->x[1] = 0x88;
+    return ACT_RESUME;
 }
 
 size_t emu_read_reg(void *args, int regno)

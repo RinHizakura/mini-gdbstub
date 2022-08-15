@@ -140,6 +140,9 @@ static event_t gdbstub_process_packet(gdbstub_t *gdbstub,
     event_t event = EVENT_NONE;
 
     switch (request) {
+    case 'c':
+        event = EVENT_CONT;
+        break;
     case 'g':
         process_reg_read(gdbstub, args);
         break;
@@ -168,8 +171,15 @@ static action_t gdbstub_handle_event(gdbstub_t *gdbstub,
     case EVENT_CONT:
         return gdbstub->ops->cont(args);
     default:
-        return ACT_CONT;
+        return ACT_NONE;
     }
+}
+
+static void gdbstub_act_resume(gdbstub_t *gdbstub)
+{
+    /* TODO */
+    while (1)
+        ;
 }
 
 bool gdbstub_run(gdbstub_t *gdbstub, void *args)
@@ -186,6 +196,9 @@ bool gdbstub_run(gdbstub_t *gdbstub, void *args)
         action_t act = gdbstub_handle_event(gdbstub, event, args);
 
         switch (act) {
+        case ACT_RESUME:
+            gdbstub_act_resume(gdbstub);
+            break;
         case ACT_SHUTDOWN:
             return true;
         default:

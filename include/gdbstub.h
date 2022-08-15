@@ -10,7 +10,8 @@ typedef enum {
 } event_t;
 
 typedef enum {
-    ACT_CONT,
+    ACT_NONE,
+    ACT_RESUME,
     ACT_SHUTDOWN,
 } action_t;
 
