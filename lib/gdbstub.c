@@ -3,8 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-#define DEBUG
+#include "arch.h"
 
 bool gdbstub_init(gdbstub_t *gdbstub, struct target_ops *ops, char *s)
 {
@@ -40,10 +39,6 @@ bool gdbstub_init(gdbstub_t *gdbstub, struct target_ops *ops, char *s)
     return true;
 }
 
-/* FIXME: fake register num
- * - https://github.com/bminor/binutils-gdb/blob/master/gdb/riscv-tdep.h */
-#define ARCH_REG_NUM (1)
-
 static char hexchars[] = "0123456789abcdef";
 static void num_to_str(uint8_t *num, char *str, int bytes)
 {
@@ -59,15 +54,36 @@ static void process_reg_read(gdbstub_t *gdbstub)
     /* FIXME: yes, lots of memory copy again :( */
     char packet_str[MAX_PACKET_SIZE];
 
-    uint32_t reg_value;
+    /* FIXME: why should we pass a 64 bits value for 32 bits registers? */
+    size_t reg_value;
     for (int i = 0; i < ARCH_REG_NUM; i++) {
         // FIXME: this is a fake register value
-        reg_value = 0x12345678;
+        reg_value = i;
         num_to_str((uint8_t *) &reg_value,
                    packet_str + i * sizeof(reg_value) * 2, sizeof(reg_value));
     }
     packet_str[ARCH_REG_NUM * sizeof(reg_value) * 2] = '\0';
     conn_send_pktstr(&gdbstub->conn, packet_str);
+}
+
+void process_xfer(gdbstub_t *gdbstub, char *s)
+{
+    char *name = s;
+    char *args = strchr(s, ':');
+    if (args) {
+        *args = '\0';
+        args++;
+    }
+
+#ifdef DEBUG
+    printf("xfer = %s\n", name);
+#endif
+    if (!strcmp(name, "features")) {
+        /* FIXME: We should check the args */
+        conn_send_pktstr(&gdbstub->conn, TAEGET_DESC);
+    } else {
+        conn_send_pktstr(&gdbstub->conn, "");
+    }
 }
 
 static void process_query(gdbstub_t *gdbstub, char *payload)
@@ -88,6 +104,8 @@ static void process_query(gdbstub_t *gdbstub, char *payload)
     } else if (!strcmp(name, "Attached")) {
         /* assume attached to an existing process */
         conn_send_pktstr(&gdbstub->conn, "1");
+    } else if (!strcmp(name, "Xfer")) {
+        process_xfer(gdbstub, args);
     } else {
         conn_send_pktstr(&gdbstub->conn, "");
     }

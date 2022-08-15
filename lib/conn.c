@@ -7,8 +7,6 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
-#define DEBUG
-
 static bool socket_poll(int socket_fd, int timeout, int events)
 {
     struct pollfd pfd = (struct pollfd){
