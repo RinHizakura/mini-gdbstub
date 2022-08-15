@@ -6,6 +6,7 @@
 
 typedef enum {
     EVENT_NONE,
+    EVENT_CONT,
 } event_t;
 
 typedef enum {
@@ -14,7 +15,7 @@ typedef enum {
 } action_t;
 
 struct target_ops {
-    action_t (*handle_event)(event_t e, void *args);
+    action_t (*cont)(void *args);
 };
 
 typedef struct {

@@ -6,17 +6,15 @@ struct emu {
     gdbstub_t gdbstub;
 };
 
-action_t emu_handle_event(event_t e, void *args)
+action_t emu_cont(void *args)
 {
     struct emu *emu = (struct emu *) args;
-    if (e == EVENT_NONE)
-        return ACT_SHUTDOWN;
-
-    return ACT_CONT;
+    // do somethig here......
+    return ACT_SHUTDOWN;
 }
 
 struct target_ops emu_ops = {
-    .handle_event = emu_handle_event,
+    .cont = emu_cont,
 };
 
 int main()

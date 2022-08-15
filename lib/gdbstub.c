@@ -74,9 +74,8 @@ void process_xfer(gdbstub_t *gdbstub, char *s)
         *args = '\0';
         args++;
     }
-
 #ifdef DEBUG
-    printf("xfer = %s\n", name);
+    printf("xfer = %s %s\n", name, args);
 #endif
     if (!strcmp(name, "features")) {
         /* FIXME: We should check the args */
@@ -88,15 +87,15 @@ void process_xfer(gdbstub_t *gdbstub, char *s)
 
 static void process_query(gdbstub_t *gdbstub, char *payload)
 {
-#ifdef DEBUG
-    printf("payload = %s\n", payload);
-#endif
     char *name = payload;
     char *args = strchr(payload, ':');
     if (args) {
         *args = '\0';
         args++;
     }
+#ifdef DEBUG
+    printf("query = %s %s\n", name, args);
+#endif
 
     if (!strcmp(name, "Supported")) {
         /* TODO: We should do handshake correctly */
@@ -111,13 +110,33 @@ static void process_query(gdbstub_t *gdbstub, char *payload)
     }
 }
 
-static void gdbstub_process_packet(gdbstub_t *gdbstub, packet_t *inpkt)
+static void process_vpacket(gdbstub_t *gdbstub, char *payload)
+{
+    char *name = payload;
+    char *args = strchr(payload, ':');
+    if (args) {
+        *args = '\0';
+        args++;
+    }
+#ifdef DEBUG
+    printf("vpacket = %s %s\n", name, args);
+#endif
+
+    if (!strcmp("Cont?", name)) {
+        conn_send_pktstr(&gdbstub->conn, "vCont;c;");
+    } else {
+        conn_send_pktstr(&gdbstub->conn, "");
+    }
+}
+
+static event_t gdbstub_process_packet(gdbstub_t *gdbstub, packet_t *inpkt)
 {
     assert(inpkt->data[0] == '$');
     /* TODO: check the checksum result */
     inpkt->data[inpkt->end_pos - CSUM_SIZE] = 0;
     uint8_t request = inpkt->data[1];
     char *payload = (char *) &inpkt->data[2];
+    event_t event = EVENT_NONE;
 
     switch (request) {
     case 'g':
@@ -126,12 +145,29 @@ static void gdbstub_process_packet(gdbstub_t *gdbstub, packet_t *inpkt)
     case 'q':
         process_query(gdbstub, payload);
         break;
+    case 'v':
+        process_vpacket(gdbstub, payload);
+        break;
     case '?':
         conn_send_pktstr(&gdbstub->conn, "S05");
         break;
     default:
         conn_send_pktstr(&gdbstub->conn, "");
         break;
+    }
+
+    return event;
+}
+
+static action_t gdbstub_handle_event(gdbstub_t *gdbstub,
+                                     event_t event,
+                                     void *args)
+{
+    switch (event) {
+    case EVENT_CONT:
+        return gdbstub->ops->cont(args);
+    default:
+        return ACT_CONT;
     }
 }
 
@@ -143,12 +179,10 @@ bool gdbstub_run(gdbstub_t *gdbstub, void *args)
 #ifdef DEBUG
         printf("packet = %s\n", pkt->data);
 #endif
-        gdbstub_process_packet(gdbstub, pkt);
+        event_t event = gdbstub_process_packet(gdbstub, pkt);
         free(pkt);
 
-        event_t e = EVENT_NONE;
-        // action_t act = gdbstub->ops->handle_event(e, args);
-        action_t act = ACT_CONT;
+        action_t act = gdbstub_handle_event(gdbstub, event, args);
 
         switch (act) {
         case ACT_SHUTDOWN:
