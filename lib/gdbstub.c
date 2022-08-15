@@ -49,7 +49,7 @@ static void num_to_str(uint8_t *num, char *str, int bytes)
     }
 }
 
-static void process_reg_read(gdbstub_t *gdbstub)
+static void process_reg_read(gdbstub_t *gdbstub, void *args)
 {
     /* FIXME: yes, lots of memory copy again :( */
     char packet_str[MAX_PACKET_SIZE];
@@ -57,8 +57,7 @@ static void process_reg_read(gdbstub_t *gdbstub)
     /* FIXME: why should we pass a 64 bits value for 32 bits registers? */
     size_t reg_value;
     for (int i = 0; i < ARCH_REG_NUM; i++) {
-        // FIXME: this is a fake register value
-        reg_value = i;
+        reg_value = gdbstub->ops->read_reg(args, i);
         num_to_str((uint8_t *) &reg_value,
                    packet_str + i * sizeof(reg_value) * 2, sizeof(reg_value));
     }
@@ -129,7 +128,9 @@ static void process_vpacket(gdbstub_t *gdbstub, char *payload)
     }
 }
 
-static event_t gdbstub_process_packet(gdbstub_t *gdbstub, packet_t *inpkt)
+static event_t gdbstub_process_packet(gdbstub_t *gdbstub,
+                                      packet_t *inpkt,
+                                      void *args)
 {
     assert(inpkt->data[0] == '$');
     /* TODO: check the checksum result */
@@ -140,7 +141,7 @@ static event_t gdbstub_process_packet(gdbstub_t *gdbstub, packet_t *inpkt)
 
     switch (request) {
     case 'g':
-        process_reg_read(gdbstub);
+        process_reg_read(gdbstub, args);
         break;
     case 'q':
         process_query(gdbstub, payload);
@@ -179,7 +180,7 @@ bool gdbstub_run(gdbstub_t *gdbstub, void *args)
 #ifdef DEBUG
         printf("packet = %s\n", pkt->data);
 #endif
-        event_t event = gdbstub_process_packet(gdbstub, pkt);
+        event_t event = gdbstub_process_packet(gdbstub, pkt, args);
         free(pkt);
 
         action_t act = gdbstub_handle_event(gdbstub, event, args);

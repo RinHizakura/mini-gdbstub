@@ -16,6 +16,7 @@ typedef enum {
 
 struct target_ops {
     action_t (*cont)(void *args);
+    size_t (*read_reg)(void *args, int regno);
 };
 
 typedef struct {
