@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "arch.h"
+#include "gdb_signal.h"
 
 bool gdbstub_init(gdbstub_t *gdbstub, struct target_ops *ops, char *s)
 {
@@ -177,9 +178,9 @@ static action_t gdbstub_handle_event(gdbstub_t *gdbstub,
 
 static void gdbstub_act_resume(gdbstub_t *gdbstub)
 {
-    /* TODO */
-    while (1)
-        ;
+    char packet_str[32];
+    sprintf(packet_str, "S%02x", GDB_SIGNAL_TRAP);
+    conn_send_pktstr(&gdbstub->conn, packet_str);
 }
 
 bool gdbstub_run(gdbstub_t *gdbstub, void *args)
