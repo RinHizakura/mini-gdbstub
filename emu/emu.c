@@ -14,6 +14,15 @@ action_t emu_cont(void *args)
     return ACT_RESUME;
 }
 
+action_t emu_step(void *args)
+{
+    struct emu *emu = (struct emu *) args;
+    static int step_cnt = 0;
+    emu->x[step_cnt % 32]++;
+    step_cnt++;
+    return ACT_RESUME;
+}
+
 size_t emu_read_reg(void *args, int regno)
 {
     struct emu *emu = (struct emu *) args;
@@ -26,8 +35,15 @@ size_t emu_read_reg(void *args, int regno)
     }
 }
 
+size_t emu_read_mem(void *args, size_t addr, size_t len)
+{
+    struct emu *emu = (struct emu *) args;
+    return 0x1234;
+}
+
 struct target_ops emu_ops = {
     .read_reg = emu_read_reg,
+    .read_mem = emu_read_mem,
     .cont = emu_cont,
 };
 

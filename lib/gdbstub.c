@@ -12,6 +12,7 @@ bool gdbstub_init(gdbstub_t *gdbstub, struct target_ops *ops, char *s)
     if (s == NULL || ops == NULL)
         return false;
 
+    memset(gdbstub, 0, sizeof(gdbstub_t));
     gdbstub->ops = ops;
     pktbuf_init(&gdbstub->in);
 
@@ -54,6 +55,22 @@ static void process_reg_read(gdbstub_t *gdbstub, void *args)
         /* FIXME: we may have to consider the endian */
         hex_to_str((uint8_t *) &reg_value, &packet_str[i * reg_sz * 2], reg_sz);
     }
+    conn_send_pktstr(&gdbstub->conn, packet_str);
+}
+
+static void process_mem_read(gdbstub_t *gdbstub, char *payload, void *args)
+{
+    size_t maddr, mlen, mval;
+    size_t mem_sz = sizeof(mval);
+    assert(sscanf(payload, "%lx,%lx", &maddr, &mlen));
+    assert(mlen <= mem_sz);
+#ifdef DEBUG
+    printf("mem read = addr %lx / len %lx\n", maddr, mlen);
+#endif
+    char packet_str[32];
+
+    mval = gdbstub->ops->read_mem(args, maddr, mlen);
+    hex_to_str((uint8_t *) &mval, packet_str, mem_sz);
     conn_send_pktstr(&gdbstub->conn, packet_str);
 }
 
@@ -133,13 +150,31 @@ static event_t gdbstub_process_packet(gdbstub_t *gdbstub,
 
     switch (request) {
     case 'c':
-        event = EVENT_CONT;
+        if (gdbstub->ops->cont != NULL) {
+            event = EVENT_CONT;
+        }
         break;
     case 'g':
-        process_reg_read(gdbstub, args);
+        if (gdbstub->ops->read_reg != NULL) {
+            process_reg_read(gdbstub, args);
+        } else {
+            conn_send_pktstr(&gdbstub->conn, "");
+        }
+        break;
+    case 'm':
+        if (gdbstub->ops->read_mem != NULL) {
+            process_mem_read(gdbstub, payload, args);
+        } else {
+            conn_send_pktstr(&gdbstub->conn, "");
+        }
         break;
     case 'q':
         process_query(gdbstub, payload);
+        break;
+    case 's':
+        if (gdbstub->ops->step != NULL) {
+            event = EVENT_STEP;
+        }
         break;
     case 'v':
         process_vpacket(gdbstub, payload);
@@ -162,6 +197,8 @@ static action_t gdbstub_handle_event(gdbstub_t *gdbstub,
     switch (event) {
     case EVENT_CONT:
         return gdbstub->ops->cont(args);
+    case EVENT_STEP:
+        return gdbstub->ops->step(args);
     default:
         return ACT_NONE;
     }

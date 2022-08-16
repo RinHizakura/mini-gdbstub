@@ -7,6 +7,7 @@
 typedef enum {
     EVENT_NONE,
     EVENT_CONT,
+    EVENT_STEP,
 } event_t;
 
 typedef enum {
@@ -17,7 +18,9 @@ typedef enum {
 
 struct target_ops {
     action_t (*cont)(void *args);
+    action_t (*step)(void *args);
     size_t (*read_reg)(void *args, int regno);
+    size_t (*read_mem)(void *args, size_t addr, size_t len);
 };
 
 typedef struct {
