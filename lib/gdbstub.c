@@ -5,6 +5,7 @@
 #include <string.h>
 #include "arch.h"
 #include "gdb_signal.h"
+#include "utils.h"
 
 bool gdbstub_init(gdbstub_t *gdbstub, struct target_ops *ops, char *s)
 {
@@ -40,29 +41,19 @@ bool gdbstub_init(gdbstub_t *gdbstub, struct target_ops *ops, char *s)
     return true;
 }
 
-static char hexchars[] = "0123456789abcdef";
-static void num_to_str(uint8_t *num, char *str, int bytes)
-{
-    for (int i = 0; i < bytes; i++) {
-        uint8_t ch = *(num + i);
-        *(str + i * 2) = hexchars[ch >> 4];
-        *(str + i * 2 + 1) = hexchars[ch & 0xf];
-    }
-}
-
 static void process_reg_read(gdbstub_t *gdbstub, void *args)
 {
     /* FIXME: yes, lots of memory copy again :( */
     char packet_str[MAX_PACKET_SIZE];
+    size_t reg_value;
+    size_t reg_sz = sizeof(reg_value);
 
     /* FIXME: why should we pass a 64 bits value for 32 bits registers? */
-    size_t reg_value;
     for (int i = 0; i < ARCH_REG_NUM; i++) {
         reg_value = gdbstub->ops->read_reg(args, i);
-        num_to_str((uint8_t *) &reg_value,
-                   packet_str + i * sizeof(reg_value) * 2, sizeof(reg_value));
+        /* FIXME: we may have to consider the endian */
+        hex_to_str((uint8_t *) &reg_value, &packet_str[i * reg_sz * 2], reg_sz);
     }
-    packet_str[ARCH_REG_NUM * sizeof(reg_value) * 2] = '\0';
     conn_send_pktstr(&gdbstub->conn, packet_str);
 }
 
@@ -123,7 +114,7 @@ static void process_vpacket(gdbstub_t *gdbstub, char *payload)
 #endif
 
     if (!strcmp("Cont?", name)) {
-        conn_send_pktstr(&gdbstub->conn, "vCont;c;");
+        conn_send_pktstr(&gdbstub->conn, "vCont;c;s;");
     } else {
         conn_send_pktstr(&gdbstub->conn, "");
     }
