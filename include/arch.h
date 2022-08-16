@@ -1,7 +1,7 @@
 #ifndef ARCH_H
 #define ARCH_H
 
-#ifdef RISCV_EMU
+#ifdef RISCV32_EMU
 /* - https://github.com/bminor/binutils-gdb/blob/master/gdb/riscv-tdep.h
  * - https://github.com/bminor/binutils-gdb/tree/master/gdb/features/riscv */
 #define ARCH_REG_NUM (33)
