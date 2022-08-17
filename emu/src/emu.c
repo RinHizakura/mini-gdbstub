@@ -3,30 +3,18 @@
 #include <string.h>
 #include "gdbstub.h"
 
-#define MAX_MEM_SIZE 1024
-
-struct emu {
-    size_t x[32];
-    size_t pc;
+#define MEM_SIZE (1024)
+struct mem {
     uint8_t *mem;
-    gdbstub_t gdbstub;
+    size_t code_size;
 };
 
-action_t emu_cont(void *args)
-{
-    struct emu *emu = (struct emu *) args;
-    emu->x[1] = 0x88;
-    return ACT_RESUME;
-}
-
-action_t emu_stepi(void *args)
-{
-    struct emu *emu = (struct emu *) args;
-    static int step_cnt = 0;
-    emu->x[step_cnt % 32]++;
-    step_cnt++;
-    return ACT_RESUME;
-}
+struct emu {
+    struct mem m;
+    size_t x[32];
+    size_t pc;
+    gdbstub_t gdbstub;
+};
 
 size_t emu_read_reg(void *args, int regno)
 {
@@ -45,28 +33,79 @@ size_t emu_read_mem(void *args, size_t addr, size_t len)
     struct emu *emu = (struct emu *) args;
     size_t val = 0;
     for (size_t i = 0; i < len; i++) {
-        if (addr + i < MAX_MEM_SIZE) {
-            val |= emu->mem[addr + i];
+        if (addr + i < MEM_SIZE) {
+            val |= emu->m.mem[addr + i];
         }
     }
     return val;
 }
 
+action_t emu_stepi(void *args)
+{
+    struct emu *emu = (struct emu *) args;
+    while (emu->pc < emu->m.code_size) {
+        uint32_t inst = emu_read_mem(args, emu->pc, 4);
+        emu->pc += 4;
+    }
+
+    return ACT_RESUME;
+}
+
 struct target_ops emu_ops = {
     .read_reg = emu_read_reg,
     .read_mem = emu_read_mem,
-    .cont = emu_cont,
+    .cont = NULL,
     .stepi = emu_stepi,
 };
 
-int main()
+int init_mem(struct mem *m, const char *filename)
 {
+    if (!filename) {
+        return -1;
+    }
+
+    FILE *fp = fopen(filename, "rb");
+    if (!fp) {
+        return -1;
+    }
+
+    fseek(fp, 0, SEEK_END);
+    size_t sz = ftell(fp) * sizeof(uint8_t);
+    rewind(fp);
+
+    m->mem = malloc(MEM_SIZE);
+    if (!m->mem) {
+        fclose(fp);
+        return -1;
+    }
+    memset(m->mem, 0, MEM_SIZE);
+    size_t read_size = fread(m->mem, sizeof(uint8_t), sz, fp);
+
+    if (read_size != sz) {
+        fclose(fp);
+        return -1;
+    }
+    fclose(fp);
+    m->code_size = read_size;
+    return 0;
+}
+
+void free_mem(struct mem *m)
+{
+    free(m->mem);
+}
+
+int main(int argc, char *argv[])
+{
+    if (argc != 2) {
+        return -1;
+    }
+
     struct emu emu;
-    for (int i = 0; i < 32; i++)
-        emu.x[i] = i;
+    memset(&emu, 0, sizeof(struct emu));
     emu.pc = 0;
-    emu.mem = malloc(MAX_MEM_SIZE);
-    memset(emu.mem, 0, MAX_MEM_SIZE);
+    emu.x[2] = MEM_SIZE;
+    init_mem(&emu.m, argv[1]);
 
     if (!gdbstub_init(&emu.gdbstub, &emu_ops, "127.0.0.1:1234")) {
         fprintf(stderr, "Fail to create socket.\n");
@@ -78,7 +117,7 @@ int main()
         return -1;
     }
     gdbstub_close(&emu.gdbstub);
-    free(emu.mem);
+    free_mem(&emu.m);
 
     return 0;
 }

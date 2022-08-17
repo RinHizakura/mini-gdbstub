@@ -21,6 +21,10 @@ $(OUT)/%.o: %.c
 $(BIN): $(COBJ)
 	$(CC) $^ -o $@ $(LDFLAGS)
 
+check: $(BIN)
+	 riscv32-unknown-elf-gcc -Wl,-Ttext=0x0 -nostdlib -o test.obj ./test/test.s
+	 riscv32-unknown-elf-objcopy -O binary test.obj test.bin
+
 clean:
 	$(RM) $(COBJ)
 	$(RM) $(BIN)
