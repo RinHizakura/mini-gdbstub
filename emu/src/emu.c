@@ -34,18 +34,44 @@ size_t emu_read_mem(void *args, size_t addr, size_t len)
     size_t val = 0;
     for (size_t i = 0; i < len; i++) {
         if (addr + i < MEM_SIZE) {
-            val |= emu->m.mem[addr + i];
+            val |= (emu->m.mem[addr + i] << (8 * i));
         }
     }
     return val;
 }
 
+#define asr_i64(value, amount) \
+    (value < 0 ? ~(~value >> amount) : value >> amount)
+static void exec(struct emu *emu, uint32_t inst)
+{
+    uint8_t opcode = inst & 0x7f;
+    uint8_t rd = (inst >> 7) & 0x1f;
+    uint8_t rs1 = ((inst >> 15) & 0x1f);
+    uint8_t rs2 = ((inst >> 20) & 0x1f);
+    uint64_t imm = asr_i64((int) (inst & 0xfff00000), 20);
+
+    switch (opcode) {
+    // addi
+    case 0x13:
+        emu->x[rd] = emu->x[rd] + imm;
+        break;
+    // add
+    case 0x33:
+        emu->x[rd] = emu->x[rs1] + emu->x[rs2];
+        break;
+    default:
+        printf("Not implemented or invalid opcode 0x%x\n", opcode);
+        break;
+    }
+}
+
 action_t emu_stepi(void *args)
 {
     struct emu *emu = (struct emu *) args;
-    while (emu->pc < emu->m.code_size) {
+    if (emu->pc < emu->m.code_size) {
         uint32_t inst = emu_read_mem(args, emu->pc, 4);
         emu->pc += 4;
+        exec(emu, inst);
     }
 
     return ACT_RESUME;
@@ -105,7 +131,9 @@ int main(int argc, char *argv[])
     memset(&emu, 0, sizeof(struct emu));
     emu.pc = 0;
     emu.x[2] = MEM_SIZE;
-    init_mem(&emu.m, argv[1]);
+    if (init_mem(&emu.m, argv[1]) == -1) {
+        return -1;
+    }
 
     if (!gdbstub_init(&emu.gdbstub, &emu_ops, "127.0.0.1:1234")) {
         fprintf(stderr, "Fail to create socket.\n");
