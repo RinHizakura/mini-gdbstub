@@ -1,0 +1,26 @@
+CFLAGS = -I../include -Wall -Wextra
+LDFLAGS = -Wl,-rpath="$(CURDIR)/../" -L.. -ldl -lgdbstub
+
+CURDIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
+OUT ?= build
+BIN = emu
+LIBGDBSTUB = libgdbstub.so
+SHELL_HACK := $(shell mkdir -p $(OUT))
+
+CSRCS = $(shell find ./src -name '*.c')
+_COBJ =  $(notdir $(CSRCS))
+COBJ = $(_COBJ:%.c=$(OUT)/%.o)
+
+vpath %.c $(sort $(dir $(CSRCS)))
+
+all: $(COBJ) $(BIN)
+
+$(OUT)/%.o: %.c
+	$(CC) -c $(CFLAGS) $< -o $@
+
+$(BIN): $(COBJ)
+	$(CC) $^ -o $@ $(LDFLAGS)
+
+clean:
+	$(RM) $(COBJ)
+	$(RM) $(BIN)

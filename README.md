@@ -7,15 +7,20 @@ to help you adding debug mode on emulator
 ## Usage
 
 First of all, you should build the library for the shared object file `libgdbstub.so`.
-This command also give you a mock emulator to simply test the functionality.
 ```
 make
+```
+
+If you want a simple example to test the library, we give you a mock emulator to
+simply play with it.
+```
+make test
 ```
 
 Once the compiles are completed, you can run the mock emulator under
 the debug mode.
 ```
-$ ./build/emu
+$ ./emu/emu
 ```
 
 Then, you can open the GDB and iteract with the emulator by some commands!

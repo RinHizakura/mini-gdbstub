@@ -12,16 +12,10 @@ LIBSRCS = $(shell find ./lib -name '*.c')
 _LIB_OBJ =  $(notdir $(LIBSRCS))
 LIB_OBJ = $(_LIB_OBJ:%.c=$(OUT)/%.o)
 
-CSRCS = $(shell find ./emu -name '*.c')
-_COBJ =  $(notdir $(CSRCS))
-COBJ = $(_COBJ:%.c=$(OUT)/%.o)
-
-TESTS = $(OUT)/emu
-
-vpath %.c $(sort $(dir $(CSRCS)))
 vpath %.c $(sort $(dir $(LIBSRCS)))
+.PHONY: all test clean
 
-all: $(GIT_HOOKS) $(LIBGDBSTUB) $(TESTS)
+all: $(GIT_HOOKS) $(LIBGDBSTUB)
 
 $(GIT_HOOKS):
 	@scripts/install-git-hooks
@@ -33,16 +27,11 @@ $(OUT)/%.o: %.c
 $(LIBGDBSTUB): $(LIB_OBJ)
 	$(CC) -shared $(LIB_OBJ) -o $@
 
-$(TESTS): %: %.o $(LIBGDBSTUB)
-	$(CC) $^ -o $@ $(LDFLAGS)
-
-test: all
-	$(OUT)/emu
+test:
+	$(MAKE) -C emu
 
 clean:
 	$(RM) $(LIB_OBJ)
-	$(RM) $(COBJ)
-	$(RM) $(TESTS)
 	$(RM) $(LIBGDBSTUB)
 	$(RM) $(OUT)/*.d
 
