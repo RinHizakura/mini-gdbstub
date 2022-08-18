@@ -183,6 +183,9 @@ static event_t gdbstub_process_packet(gdbstub_t *gdbstub,
     case '?':
         conn_send_pktstr(&gdbstub->conn, "S05");
         break;
+    case 'D':
+        event = EVENT_DETACH;
+        break;
     default:
         conn_send_pktstr(&gdbstub->conn, "");
         break;
@@ -200,6 +203,8 @@ static action_t gdbstub_handle_event(gdbstub_t *gdbstub,
         return gdbstub->ops->cont(args);
     case EVENT_STEP:
         return gdbstub->ops->stepi(args);
+    case EVENT_DETACH:
+        return ACT_SHUTDOWN;
     default:
         return ACT_NONE;
     }
@@ -224,7 +229,6 @@ bool gdbstub_run(gdbstub_t *gdbstub, void *args)
         free(pkt);
 
         action_t act = gdbstub_handle_event(gdbstub, event, args);
-
         switch (act) {
         case ACT_RESUME:
             gdbstub_act_resume(gdbstub);

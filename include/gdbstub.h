@@ -7,6 +7,7 @@
 typedef enum {
     EVENT_NONE,
     EVENT_CONT,
+    EVENT_DETACH,
     EVENT_STEP,
 } event_t;
 
