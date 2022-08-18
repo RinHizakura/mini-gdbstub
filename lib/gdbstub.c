@@ -160,16 +160,16 @@ static void process_break_points(gdbstub_t *gdbstub, char *payload, void *args)
     }
 }
 
-static event_t gdbstub_process_packet(gdbstub_t *gdbstub,
-                                      packet_t *inpkt,
-                                      void *args)
+static gdb_event_t gdbstub_process_packet(gdbstub_t *gdbstub,
+                                          packet_t *inpkt,
+                                          void *args)
 {
     assert(inpkt->data[0] == '$');
     /* TODO: check the checksum result */
     inpkt->data[inpkt->end_pos - CSUM_SIZE] = 0;
     uint8_t request = inpkt->data[1];
     char *payload = (char *) &inpkt->data[2];
-    event_t event = EVENT_NONE;
+    gdb_event_t event = EVENT_NONE;
 
     switch (request) {
     case 'c':
@@ -227,9 +227,9 @@ static event_t gdbstub_process_packet(gdbstub_t *gdbstub,
     return event;
 }
 
-static action_t gdbstub_handle_event(gdbstub_t *gdbstub,
-                                     event_t event,
-                                     void *args)
+static gdb_action_t gdbstub_handle_event(gdbstub_t *gdbstub,
+                                         gdb_event_t event,
+                                         void *args)
 {
     switch (event) {
     case EVENT_CONT:
@@ -258,10 +258,10 @@ bool gdbstub_run(gdbstub_t *gdbstub, void *args)
 #ifdef DEBUG
         printf("packet = %s\n", pkt->data);
 #endif
-        event_t event = gdbstub_process_packet(gdbstub, pkt, args);
+        gdb_event_t event = gdbstub_process_packet(gdbstub, pkt, args);
         free(pkt);
 
-        action_t act = gdbstub_handle_event(gdbstub, event, args);
+        gdb_action_t act = gdbstub_handle_event(gdbstub, event, args);
         switch (act) {
         case ACT_RESUME:
             gdbstub_act_resume(gdbstub);

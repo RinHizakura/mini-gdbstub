@@ -9,21 +9,21 @@ typedef enum {
     EVENT_CONT,
     EVENT_DETACH,
     EVENT_STEP,
-} event_t;
+} gdb_event_t;
 
 typedef enum {
     ACT_NONE,
     ACT_RESUME,
     ACT_SHUTDOWN,
-} action_t;
+} gdb_action_t;
 
 typedef enum {
     BP_SOFTWARE,
 } bp_type_t;
 
 struct target_ops {
-    action_t (*cont)(void *args);
-    action_t (*stepi)(void *args);
+    gdb_action_t (*cont)(void *args);
+    gdb_action_t (*stepi)(void *args);
     size_t (*read_reg)(void *args, int regno);
     void (*read_mem)(void *args, size_t addr, size_t len, void *val);
     bool (*set_swbp)(void *args, size_t addr);
