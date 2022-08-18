@@ -1,4 +1,4 @@
-CFLAGS = -Iinclude -Wall -Wextra -MMD -DRISCV32_EMU -DDEBUG -g#-Werror
+CFLAGS = -Iinclude -Wall -Wextra -MMD -DRISCV32_EMU #-DDEBUG -Werror
 LDFLAGS = -Wl,-rpath="$(CURDIR)" -L. -lgdbstub
 
 CURDIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
