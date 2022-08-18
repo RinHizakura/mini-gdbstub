@@ -15,7 +15,7 @@ TEST_OBJ = test.obj
 
 vpath %.c $(sort $(dir $(CSRCS)))
 
-all: $(COBJ) $(BIN)
+all: clean $(COBJ) $(BIN)
 
 $(OUT)/%.o: %.c
 	$(CC) -c $(CFLAGS) $< -o $@
