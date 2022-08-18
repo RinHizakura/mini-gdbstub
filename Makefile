@@ -1,5 +1,5 @@
 CFLAGS = -Iinclude -Wall -Wextra -MMD -DRISCV32_EMU -DDEBUG -g#-Werror
-LDFLAGS = -Wl,-rpath="$(CURDIR)" -L. -ldl -lgdbstub
+LDFLAGS = -Wl,-rpath="$(CURDIR)" -L. -lgdbstub
 
 CURDIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 OUT ?= build
