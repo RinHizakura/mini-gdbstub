@@ -13,6 +13,7 @@ struct emu {
     struct mem m;
     size_t x[32];
     size_t pc;
+    size_t bp_addr;
     gdbstub_t gdbstub;
 };
 
@@ -62,6 +63,19 @@ static void exec(struct emu *emu, uint32_t inst)
     }
 }
 
+action_t emu_cont(void *args)
+{
+    struct emu *emu = (struct emu *) args;
+    while (emu->pc < emu->m.code_size && emu->pc != emu->bp_addr) {
+        uint32_t inst;
+        emu_read_mem(args, emu->pc, 4, &inst);
+        emu->pc += 4;
+        exec(emu, inst);
+    }
+
+    return ACT_RESUME;
+}
+
 action_t emu_stepi(void *args)
 {
     struct emu *emu = (struct emu *) args;
@@ -75,11 +89,19 @@ action_t emu_stepi(void *args)
     return ACT_RESUME;
 }
 
+bool emu_set_swbp(void *args, size_t addr)
+{
+    struct emu *emu = (struct emu *) args;
+    emu->bp_addr = addr;
+    return true;
+}
+
 struct target_ops emu_ops = {
     .read_reg = emu_read_reg,
     .read_mem = emu_read_mem,
-    .cont = NULL,
+    .cont = emu_cont,
     .stepi = emu_stepi,
+    .set_swbp = emu_set_swbp,
 };
 
 int init_mem(struct mem *m, const char *filename)
@@ -129,6 +151,7 @@ int main(int argc, char *argv[])
     memset(&emu, 0, sizeof(struct emu));
     emu.pc = 0;
     emu.x[2] = MEM_SIZE;
+    emu.bp_addr = -1;
     if (init_mem(&emu.m, argv[1]) == -1) {
         return -1;
     }

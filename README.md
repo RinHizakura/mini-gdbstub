@@ -20,7 +20,7 @@ make test
 Once the compiles are completed, you can run the mock emulator under
 the debug mode.
 ```
-$ ./emu/emu <binary file>
+$ ./emu/build/emu <binary file>
 ```
 
 Then, you can open the GDB and iteract with the emulator by some commands!

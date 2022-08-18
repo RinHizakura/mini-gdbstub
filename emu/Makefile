@@ -10,12 +10,12 @@ CSRCS = $(shell find ./src -name '*.c')
 _COBJ =  $(notdir $(CSRCS))
 COBJ = $(_COBJ:%.c=$(OUT)/%.o)
 
-TEST_BIN = test.bin
 TEST_OBJ = test.obj
+TEST_BIN = test.bin
 
 vpath %.c $(sort $(dir $(CSRCS)))
 
-all: clean $(COBJ) $(BIN)
+all: clean $(COBJ) $(BIN) $(TEST_BIN)
 
 $(OUT)/%.o: %.c
 	$(CC) -c $(CFLAGS) $< -o $@
@@ -23,10 +23,11 @@ $(OUT)/%.o: %.c
 $(BIN): $(COBJ)
 	$(CC) $^ -o $@ $(LDFLAGS)
 
-check: $(BIN)
+$(TEST_OBJ):
 	riscv32-unknown-elf-gcc -march=rv32g -Wl,-Ttext=0x0 -nostdlib -g -o $(TEST_OBJ) ./test/test.c
+
+$(TEST_BIN): $(TEST_OBJ)
 	riscv32-unknown-elf-objcopy -O binary test.obj $(TEST_BIN)
-	$(BIN) $(TEST_BIN)
 
 clean:
 	$(RM) $(COBJ)

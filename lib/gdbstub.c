@@ -114,6 +114,8 @@ static void process_query(gdbstub_t *gdbstub, char *payload)
         conn_send_pktstr(&gdbstub->conn, "1");
     } else if (!strcmp(name, "Xfer")) {
         process_xfer(gdbstub, args);
+    } else if (!strcmp(name, "Symbol")) {
+        conn_send_pktstr(&gdbstub->conn, "OK");
     } else {
         conn_send_pktstr(&gdbstub->conn, "");
     }
@@ -138,6 +140,26 @@ static void process_vpacket(gdbstub_t *gdbstub, char *payload)
     }
 }
 
+static void process_break_points(gdbstub_t *gdbstub, char *payload, void *args)
+{
+    size_t type, addr, kind;
+    assert(sscanf(payload, "%zx,%zx,%zx", &type, &addr, &kind) == 3);
+
+#ifdef DEBUG
+    printf("breakpoints = %zx %zx %zx\n", type, addr, kind);
+#endif
+
+    switch (type) {
+    case BP_SOFTWARE:
+        gdbstub->ops->set_swbp(args, addr);
+        conn_send_pktstr(&gdbstub->conn, "OK");
+        break;
+    default:
+        conn_send_pktstr(&gdbstub->conn, "");
+        break;
+    }
+}
+
 static event_t gdbstub_process_packet(gdbstub_t *gdbstub,
                                       packet_t *inpkt,
                                       void *args)
@@ -153,6 +175,8 @@ static event_t gdbstub_process_packet(gdbstub_t *gdbstub,
     case 'c':
         if (gdbstub->ops->cont != NULL) {
             event = EVENT_CONT;
+        } else {
+            conn_send_pktstr(&gdbstub->conn, "");
         }
         break;
     case 'g':
@@ -175,6 +199,8 @@ static event_t gdbstub_process_packet(gdbstub_t *gdbstub,
     case 's':
         if (gdbstub->ops->stepi != NULL) {
             event = EVENT_STEP;
+        } else {
+            conn_send_pktstr(&gdbstub->conn, "");
         }
         break;
     case 'v':
@@ -185,6 +211,13 @@ static event_t gdbstub_process_packet(gdbstub_t *gdbstub,
         break;
     case 'D':
         event = EVENT_DETACH;
+        break;
+    case 'Z':
+        if (gdbstub->ops->set_swbp != NULL) {
+            process_break_points(gdbstub, payload, args);
+        } else {
+            conn_send_pktstr(&gdbstub->conn, "");
+        }
         break;
     default:
         conn_send_pktstr(&gdbstub->conn, "");

@@ -27,7 +27,7 @@ $(OUT)/%.o: %.c
 $(LIBGDBSTUB): $(LIB_OBJ)
 	$(CC) -shared $(LIB_OBJ) -o $@
 
-test:
+test: $(LIBGDBSTUB)
 	$(MAKE) -C emu
 
 clean:
