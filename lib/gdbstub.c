@@ -46,10 +46,11 @@ static void process_reg_read(gdbstub_t *gdbstub, void *args)
 {
     /* FIXME: yes, lots of memory copy again :( */
     char packet_str[MAX_PACKET_SIZE];
-    size_t reg_value;
+#ifdef RISCV32_EMU
+    uint32_t reg_value;
+#endif
     size_t reg_sz = sizeof(reg_value);
 
-    /* FIXME: why should we pass a 64 bits value for 32 bits registers? */
     for (int i = 0; i < ARCH_REG_NUM; i++) {
         reg_value = gdbstub->ops->read_reg(args, i);
         /* FIXME: we may have to consider the endian */
@@ -60,18 +61,18 @@ static void process_reg_read(gdbstub_t *gdbstub, void *args)
 
 static void process_mem_read(gdbstub_t *gdbstub, char *payload, void *args)
 {
-    size_t maddr, mlen, mval;
-    size_t mem_sz = sizeof(mval);
+    size_t maddr, mlen;
     assert(sscanf(payload, "%lx,%lx", &maddr, &mlen));
-    assert(mlen <= mem_sz);
 #ifdef DEBUG
     printf("mem read = addr %lx / len %lx\n", maddr, mlen);
 #endif
-    char packet_str[32];
+    char packet_str[MAX_PACKET_SIZE];
 
-    mval = gdbstub->ops->read_mem(args, maddr, mlen);
-    hex_to_str((uint8_t *) &mval, packet_str, mem_sz);
+    uint8_t *mval = malloc(mlen);
+    gdbstub->ops->read_mem(args, maddr, mlen, mval);
+    hex_to_str(mval, packet_str, mlen);
     conn_send_pktstr(&gdbstub->conn, packet_str);
+    free(mval);
 }
 
 void process_xfer(gdbstub_t *gdbstub, char *s)

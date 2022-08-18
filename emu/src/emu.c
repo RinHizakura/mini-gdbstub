@@ -28,16 +28,13 @@ size_t emu_read_reg(void *args, int regno)
     }
 }
 
-size_t emu_read_mem(void *args, size_t addr, size_t len)
+void emu_read_mem(void *args, size_t addr, size_t len, void *val)
 {
     struct emu *emu = (struct emu *) args;
-    size_t val = 0;
-    for (size_t i = 0; i < len; i++) {
-        if (addr + i < MEM_SIZE) {
-            val |= (emu->m.mem[addr + i] << (8 * i));
-        }
+    if (addr + len > MEM_SIZE) {
+        len = MEM_SIZE - addr;
     }
-    return val;
+    memcpy(val, (void *) emu->m.mem + addr, len);
 }
 
 #define asr_i64(value, amount) \
@@ -69,7 +66,8 @@ action_t emu_stepi(void *args)
 {
     struct emu *emu = (struct emu *) args;
     if (emu->pc < emu->m.code_size) {
-        uint32_t inst = emu_read_mem(args, emu->pc, 4);
+        uint32_t inst;
+        emu_read_mem(args, emu->pc, 4, &inst);
         emu->pc += 4;
         exec(emu, inst);
     }
