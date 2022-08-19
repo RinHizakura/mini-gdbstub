@@ -63,7 +63,7 @@ static void exec(struct emu *emu, uint32_t inst)
     }
 }
 
-action_t emu_cont(void *args)
+gdb_action_t emu_cont(void *args)
 {
     struct emu *emu = (struct emu *) args;
     while (emu->pc < emu->m.code_size && emu->pc != emu->bp_addr) {
@@ -76,7 +76,7 @@ action_t emu_cont(void *args)
     return ACT_RESUME;
 }
 
-action_t emu_stepi(void *args)
+gdb_action_t emu_stepi(void *args)
 {
     struct emu *emu = (struct emu *) args;
     if (emu->pc < emu->m.code_size) {

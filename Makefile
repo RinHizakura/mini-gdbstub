@@ -1,5 +1,9 @@
-CFLAGS = -Iinclude -Wall -Wextra -MMD -DRISCV32_EMU #-DDEBUG -Werror
+CFLAGS = -Iinclude -Wall -Wextra -MMD -Werror
 LDFLAGS = -Wl,-rpath="$(CURDIR)" -L. -lgdbstub
+
+ifeq ("$(RV32)", "1")
+    CFLAGS +=  -DRISCV32_EMU
+endif
 
 CURDIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 OUT ?= build
@@ -13,9 +17,15 @@ _LIB_OBJ =  $(notdir $(LIBSRCS))
 LIB_OBJ = $(_LIB_OBJ:%.c=$(OUT)/%.o)
 
 vpath %.c $(sort $(dir $(LIBSRCS)))
-.PHONY: all test clean
+.PHONY: all debug test clean
 
+all: CFLAGS += -O3
+all: LDFLAGS += -O3
 all: $(GIT_HOOKS) $(LIBGDBSTUB)
+
+debug: CFLAGS += -O3 -g -DDEBUG
+debug: LDFLAGS += -O3
+debug: $(LIBGDBSTUB)
 
 $(GIT_HOOKS):
 	@scripts/install-git-hooks
@@ -27,6 +37,7 @@ $(OUT)/%.o: %.c
 $(LIBGDBSTUB): $(LIB_OBJ)
 	$(CC) -shared $(LIB_OBJ) -o $@
 
+test: CFLAGS += -DRISCV32_EMU
 test: $(LIBGDBSTUB)
 	$(MAKE) -C emu
 

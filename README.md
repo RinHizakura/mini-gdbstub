@@ -8,7 +8,7 @@ to help you adding debug mode on emulator
 
 First of all, you should build the library for the shared object file `libgdbstub.so`.
 ```
-make
+make RV32=1
 ```
 
 If you want a simple example to test the library, we give you a mock emulator to
