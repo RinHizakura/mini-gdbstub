@@ -18,7 +18,7 @@ typedef enum {
 } gdb_action_t;
 
 typedef enum {
-    BP_SOFTWARE,
+    BP_SOFTWARE = 0,
 } bp_type_t;
 
 struct target_ops {
@@ -26,7 +26,8 @@ struct target_ops {
     gdb_action_t (*stepi)(void *args);
     size_t (*read_reg)(void *args, int regno);
     void (*read_mem)(void *args, size_t addr, size_t len, void *val);
-    bool (*set_swbp)(void *args, size_t addr);
+    bool (*set_bp)(void *args, size_t addr, bp_type_t type);
+    bool (*rm_bp)(void *args, size_t addr, bp_type_t type);
 };
 
 typedef struct {

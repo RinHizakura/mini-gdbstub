@@ -140,28 +140,40 @@ static void process_vpacket(gdbstub_t *gdbstub, char *payload)
     }
 }
 
-static void process_break_points(gdbstub_t *gdbstub, char *payload, void *args)
+static void process_rm_break_points(gdbstub_t *gdbstub,
+                                    char *payload,
+                                    void *args)
 {
-    bool ret;
     size_t type, addr, kind;
     assert(sscanf(payload, "%zx,%zx,%zx", &type, &addr, &kind) == 3);
 
 #ifdef DEBUG
-    printf("breakpoints = %zx %zx %zx\n", type, addr, kind);
+    printf("remove breakpoints = %zx %zx %zx\n", type, addr, kind);
 #endif
 
-    switch (type) {
-    case BP_SOFTWARE:
-        ret = gdbstub->ops->set_swbp(args, addr);
-        if (ret)
-            conn_send_pktstr(&gdbstub->conn, "OK");
-        else
-            conn_send_pktstr(&gdbstub->conn, "E01");
-        break;
-    default:
-        conn_send_pktstr(&gdbstub->conn, "");
-        break;
-    }
+    bool ret = gdbstub->ops->rm_bp(args, addr, type);
+    if (ret)
+        conn_send_pktstr(&gdbstub->conn, "OK");
+    else
+        conn_send_pktstr(&gdbstub->conn, "E01");
+}
+
+static void process_set_break_points(gdbstub_t *gdbstub,
+                                     char *payload,
+                                     void *args)
+{
+    size_t type, addr, kind;
+    assert(sscanf(payload, "%zx,%zx,%zx", &type, &addr, &kind) == 3);
+
+#ifdef DEBUG
+    printf("set breakpoints = %zx %zx %zx\n", type, addr, kind);
+#endif
+
+    bool ret = gdbstub->ops->set_bp(args, addr, type);
+    if (ret)
+        conn_send_pktstr(&gdbstub->conn, "OK");
+    else
+        conn_send_pktstr(&gdbstub->conn, "E01");
 }
 
 static gdb_event_t gdbstub_process_packet(gdbstub_t *gdbstub,
@@ -210,6 +222,13 @@ static gdb_event_t gdbstub_process_packet(gdbstub_t *gdbstub,
     case 'v':
         process_vpacket(gdbstub, payload);
         break;
+    case 'z':
+        if (gdbstub->ops->rm_bp != NULL) {
+            process_rm_break_points(gdbstub, payload, args);
+        } else {
+            conn_send_pktstr(&gdbstub->conn, "");
+        }
+        break;
     case '?':
         conn_send_pktstr(&gdbstub->conn, "S05");
         break;
@@ -217,8 +236,8 @@ static gdb_event_t gdbstub_process_packet(gdbstub_t *gdbstub,
         event = EVENT_DETACH;
         break;
     case 'Z':
-        if (gdbstub->ops->set_swbp != NULL) {
-            process_break_points(gdbstub, payload, args);
+        if (gdbstub->ops->set_bp != NULL) {
+            process_set_break_points(gdbstub, payload, args);
         } else {
             conn_send_pktstr(&gdbstub->conn, "");
         }

@@ -92,14 +92,27 @@ gdb_action_t emu_stepi(void *args)
     return ACT_RESUME;
 }
 
-bool emu_set_swbp(void *args, size_t addr)
+bool emu_set_bp(void *args, size_t addr, bp_type_t type)
 {
     struct emu *emu = (struct emu *) args;
-    if (emu->bp_is_set)
+    if (type != BP_SOFTWARE || emu->bp_is_set)
         return false;
 
     emu->bp_is_set = true;
     emu->bp_addr = addr;
+    return true;
+}
+
+bool emu_rm_bp(void *args, size_t addr, bp_type_t type)
+{
+    struct emu *emu = (struct emu *) args;
+
+    // It's fine when there's no matching breakpoint, just doing nothing
+    if (type != BP_SOFTWARE || !emu->bp_is_set || emu->bp_addr != addr)
+        return true;
+
+    emu->bp_is_set = false;
+    emu->bp_addr = 0;
     return true;
 }
 
@@ -108,7 +121,8 @@ struct target_ops emu_ops = {
     .read_mem = emu_read_mem,
     .cont = emu_cont,
     .stepi = emu_stepi,
-    .set_swbp = emu_set_swbp,
+    .set_bp = emu_set_bp,
+    .rm_bp = emu_rm_bp,
 };
 
 int init_mem(struct mem *m, const char *filename)
