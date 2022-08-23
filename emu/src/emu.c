@@ -13,7 +13,10 @@ struct emu {
     struct mem m;
     size_t x[32];
     size_t pc;
+
+    bool bp_is_set;
     size_t bp_addr;
+
     gdbstub_t gdbstub;
 };
 
@@ -92,6 +95,10 @@ gdb_action_t emu_stepi(void *args)
 bool emu_set_swbp(void *args, size_t addr)
 {
     struct emu *emu = (struct emu *) args;
+    if (emu->bp_is_set)
+        return false;
+
+    emu->bp_is_set = true;
     emu->bp_addr = addr;
     return true;
 }
