@@ -142,6 +142,7 @@ static void process_vpacket(gdbstub_t *gdbstub, char *payload)
 
 static void process_break_points(gdbstub_t *gdbstub, char *payload, void *args)
 {
+    bool ret;
     size_t type, addr, kind;
     assert(sscanf(payload, "%zx,%zx,%zx", &type, &addr, &kind) == 3);
 
@@ -151,8 +152,11 @@ static void process_break_points(gdbstub_t *gdbstub, char *payload, void *args)
 
     switch (type) {
     case BP_SOFTWARE:
-        gdbstub->ops->set_swbp(args, addr);
-        conn_send_pktstr(&gdbstub->conn, "OK");
+        ret = gdbstub->ops->set_swbp(args, addr);
+        if (ret)
+            conn_send_pktstr(&gdbstub->conn, "OK");
+        else
+            conn_send_pktstr(&gdbstub->conn, "E01");
         break;
     default:
         conn_send_pktstr(&gdbstub->conn, "");
