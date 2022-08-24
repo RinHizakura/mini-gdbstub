@@ -4,8 +4,14 @@
 #include <stdlib.h>
 #include <string.h>
 #include "arch.h"
+#include "conn.h"
 #include "gdb_signal.h"
 #include "utils.h"
+
+struct gdbstub_private {
+    conn_t conn;
+    pktbuf_t in;
+};
 
 bool gdbstub_init(gdbstub_t *gdbstub, struct target_ops *ops, char *s)
 {
@@ -14,7 +20,8 @@ bool gdbstub_init(gdbstub_t *gdbstub, struct target_ops *ops, char *s)
 
     memset(gdbstub, 0, sizeof(gdbstub_t));
     gdbstub->ops = ops;
-    pktbuf_init(&gdbstub->in);
+    gdbstub->priv = calloc(1, sizeof(struct gdbstub_private));
+    pktbuf_init(&gdbstub->priv->in);
 
     // This is a naive implementation to parse the string
     char *addr_str = strdup(s);
@@ -33,7 +40,7 @@ bool gdbstub_init(gdbstub_t *gdbstub, struct target_ops *ops, char *s)
         return false;
     }
 
-    if (!conn_init(&gdbstub->conn, addr_str, port)) {
+    if (!conn_init(&gdbstub->priv->conn, addr_str, port)) {
         free(addr_str);
         return false;
     }
@@ -56,7 +63,7 @@ static void process_reg_read(gdbstub_t *gdbstub, void *args)
         /* FIXME: we may have to consider the endian */
         hex_to_str((uint8_t *) &reg_value, &packet_str[i * reg_sz * 2], reg_sz);
     }
-    conn_send_pktstr(&gdbstub->conn, packet_str);
+    conn_send_pktstr(&gdbstub->priv->conn, packet_str);
 }
 
 static void process_mem_read(gdbstub_t *gdbstub, char *payload, void *args)
@@ -71,7 +78,7 @@ static void process_mem_read(gdbstub_t *gdbstub, char *payload, void *args)
     uint8_t *mval = malloc(mlen);
     gdbstub->ops->read_mem(args, maddr, mlen, mval);
     hex_to_str(mval, packet_str, mlen);
-    conn_send_pktstr(&gdbstub->conn, packet_str);
+    conn_send_pktstr(&gdbstub->priv->conn, packet_str);
     free(mval);
 }
 
@@ -88,9 +95,9 @@ void process_xfer(gdbstub_t *gdbstub, char *s)
 #endif
     if (!strcmp(name, "features")) {
         /* FIXME: We should check the args */
-        conn_send_pktstr(&gdbstub->conn, TAEGET_DESC);
+        conn_send_pktstr(&gdbstub->priv->conn, TAEGET_DESC);
     } else {
-        conn_send_pktstr(&gdbstub->conn, "");
+        conn_send_pktstr(&gdbstub->priv->conn, "");
     }
 }
 
@@ -108,16 +115,17 @@ static void process_query(gdbstub_t *gdbstub, char *payload)
 
     if (!strcmp(name, "Supported")) {
         /* TODO: We should do handshake correctly */
-        conn_send_pktstr(&gdbstub->conn, "PacketSize=512;qXfer:features:read+");
+        conn_send_pktstr(&gdbstub->priv->conn,
+                         "PacketSize=512;qXfer:features:read+");
     } else if (!strcmp(name, "Attached")) {
         /* assume attached to an existing process */
-        conn_send_pktstr(&gdbstub->conn, "1");
+        conn_send_pktstr(&gdbstub->priv->conn, "1");
     } else if (!strcmp(name, "Xfer")) {
         process_xfer(gdbstub, args);
     } else if (!strcmp(name, "Symbol")) {
-        conn_send_pktstr(&gdbstub->conn, "OK");
+        conn_send_pktstr(&gdbstub->priv->conn, "OK");
     } else {
-        conn_send_pktstr(&gdbstub->conn, "");
+        conn_send_pktstr(&gdbstub->priv->conn, "");
     }
 }
 
@@ -134,9 +142,9 @@ static void process_vpacket(gdbstub_t *gdbstub, char *payload)
 #endif
 
     if (!strcmp("Cont?", name)) {
-        conn_send_pktstr(&gdbstub->conn, "vCont;c;s;");
+        conn_send_pktstr(&gdbstub->priv->conn, "vCont;c;s;");
     } else {
-        conn_send_pktstr(&gdbstub->conn, "");
+        conn_send_pktstr(&gdbstub->priv->conn, "");
     }
 }
 
@@ -153,9 +161,9 @@ static void process_rm_break_points(gdbstub_t *gdbstub,
 
     bool ret = gdbstub->ops->rm_bp(args, addr, type);
     if (ret)
-        conn_send_pktstr(&gdbstub->conn, "OK");
+        conn_send_pktstr(&gdbstub->priv->conn, "OK");
     else
-        conn_send_pktstr(&gdbstub->conn, "E01");
+        conn_send_pktstr(&gdbstub->priv->conn, "E01");
 }
 
 static void process_set_break_points(gdbstub_t *gdbstub,
@@ -171,9 +179,9 @@ static void process_set_break_points(gdbstub_t *gdbstub,
 
     bool ret = gdbstub->ops->set_bp(args, addr, type);
     if (ret)
-        conn_send_pktstr(&gdbstub->conn, "OK");
+        conn_send_pktstr(&gdbstub->priv->conn, "OK");
     else
-        conn_send_pktstr(&gdbstub->conn, "E01");
+        conn_send_pktstr(&gdbstub->priv->conn, "E01");
 }
 
 static gdb_event_t gdbstub_process_packet(gdbstub_t *gdbstub,
@@ -192,21 +200,21 @@ static gdb_event_t gdbstub_process_packet(gdbstub_t *gdbstub,
         if (gdbstub->ops->cont != NULL) {
             event = EVENT_CONT;
         } else {
-            conn_send_pktstr(&gdbstub->conn, "");
+            conn_send_pktstr(&gdbstub->priv->conn, "");
         }
         break;
     case 'g':
         if (gdbstub->ops->read_reg != NULL) {
             process_reg_read(gdbstub, args);
         } else {
-            conn_send_pktstr(&gdbstub->conn, "");
+            conn_send_pktstr(&gdbstub->priv->conn, "");
         }
         break;
     case 'm':
         if (gdbstub->ops->read_mem != NULL) {
             process_mem_read(gdbstub, payload, args);
         } else {
-            conn_send_pktstr(&gdbstub->conn, "");
+            conn_send_pktstr(&gdbstub->priv->conn, "");
         }
         break;
     case 'q':
@@ -216,7 +224,7 @@ static gdb_event_t gdbstub_process_packet(gdbstub_t *gdbstub,
         if (gdbstub->ops->stepi != NULL) {
             event = EVENT_STEP;
         } else {
-            conn_send_pktstr(&gdbstub->conn, "");
+            conn_send_pktstr(&gdbstub->priv->conn, "");
         }
         break;
     case 'v':
@@ -226,11 +234,11 @@ static gdb_event_t gdbstub_process_packet(gdbstub_t *gdbstub,
         if (gdbstub->ops->rm_bp != NULL) {
             process_rm_break_points(gdbstub, payload, args);
         } else {
-            conn_send_pktstr(&gdbstub->conn, "");
+            conn_send_pktstr(&gdbstub->priv->conn, "");
         }
         break;
     case '?':
-        conn_send_pktstr(&gdbstub->conn, "S05");
+        conn_send_pktstr(&gdbstub->priv->conn, "S05");
         break;
     case 'D':
         event = EVENT_DETACH;
@@ -239,11 +247,11 @@ static gdb_event_t gdbstub_process_packet(gdbstub_t *gdbstub,
         if (gdbstub->ops->set_bp != NULL) {
             process_set_break_points(gdbstub, payload, args);
         } else {
-            conn_send_pktstr(&gdbstub->conn, "");
+            conn_send_pktstr(&gdbstub->priv->conn, "");
         }
         break;
     default:
-        conn_send_pktstr(&gdbstub->conn, "");
+        conn_send_pktstr(&gdbstub->priv->conn, "");
         break;
     }
 
@@ -270,14 +278,14 @@ static void gdbstub_act_resume(gdbstub_t *gdbstub)
 {
     char packet_str[32];
     sprintf(packet_str, "S%02x", GDB_SIGNAL_TRAP);
-    conn_send_pktstr(&gdbstub->conn, packet_str);
+    conn_send_pktstr(&gdbstub->priv->conn, packet_str);
 }
 
 bool gdbstub_run(gdbstub_t *gdbstub, void *args)
 {
     while (true) {
-        conn_recv_packet(&gdbstub->conn, &gdbstub->in);
-        packet_t *pkt = pktbuf_pop_packet(&gdbstub->in);
+        conn_recv_packet(&gdbstub->priv->conn, &gdbstub->priv->in);
+        packet_t *pkt = pktbuf_pop_packet(&gdbstub->priv->in);
 #ifdef DEBUG
         printf("packet = %s\n", pkt->data);
 #endif
@@ -301,5 +309,6 @@ bool gdbstub_run(gdbstub_t *gdbstub, void *args)
 
 void gdbstub_close(gdbstub_t *gdbstub)
 {
-    conn_close(&gdbstub->conn);
+    conn_close(&gdbstub->priv->conn);
+    free(gdbstub->priv);
 }

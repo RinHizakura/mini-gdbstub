@@ -2,7 +2,7 @@
 #define GDBSTUB
 
 #include <stdbool.h>
-#include "conn.h"
+#include <stddef.h>
 
 typedef enum {
     EVENT_NONE,
@@ -30,10 +30,11 @@ struct target_ops {
     bool (*rm_bp)(void *args, size_t addr, bp_type_t type);
 };
 
+typedef struct gdbstub_private gdbstub_private_t;
+
 typedef struct {
-    conn_t conn;
-    pktbuf_t in;
     struct target_ops *ops;
+    gdbstub_private_t *priv;
 } gdbstub_t;
 
 bool gdbstub_init(gdbstub_t *gdbstub, struct target_ops *ops, char *s);
