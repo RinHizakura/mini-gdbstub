@@ -101,7 +101,7 @@ void process_xfer(gdbstub_t *gdbstub, char *s)
 #endif
     if (!strcmp(name, "features") && gdbstub->arch.target_desc != NULL) {
         /* FIXME: We should check the args */
-        char buf[1024];
+        char buf[MAX_PACKET_SIZE];
         sprintf(buf, TARGET_DESC, gdbstub->arch.target_desc);
         conn_send_pktstr(&gdbstub->priv->conn, buf);
     } else {
@@ -123,8 +123,11 @@ static void process_query(gdbstub_t *gdbstub, char *payload)
 
     if (!strcmp(name, "Supported")) {
         /* TODO: We should do handshake correctly */
-        conn_send_pktstr(&gdbstub->priv->conn,
-                         "PacketSize=512;qXfer:features:read+");
+        if (gdbstub->arch.target_desc != NULL)
+            conn_send_pktstr(&gdbstub->priv->conn,
+                             "PacketSize=1024;qXfer:features:read+");
+        else
+            conn_send_pktstr(&gdbstub->priv->conn, "PacketSize=1024");
     } else if (!strcmp(name, "Attached")) {
         /* assume attached to an existing process */
         conn_send_pktstr(&gdbstub->priv->conn, "1");
