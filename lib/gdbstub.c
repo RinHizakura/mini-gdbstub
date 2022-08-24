@@ -3,7 +3,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "arch.h"
 #include "conn.h"
 #include "gdb_signal.h"
 #include "utils.h"
@@ -13,13 +12,17 @@ struct gdbstub_private {
     pktbuf_t in;
 };
 
-bool gdbstub_init(gdbstub_t *gdbstub, struct target_ops *ops, char *s)
+bool gdbstub_init(gdbstub_t *gdbstub,
+                  struct target_ops *ops,
+                  arch_info_t arch,
+                  char *s)
 {
     if (s == NULL || ops == NULL)
         return false;
 
     memset(gdbstub, 0, sizeof(gdbstub_t));
     gdbstub->ops = ops;
+    gdbstub->arch = arch;
     gdbstub->priv = calloc(1, sizeof(struct gdbstub_private));
     pktbuf_init(&gdbstub->priv->in);
 
@@ -53,12 +56,12 @@ static void process_reg_read(gdbstub_t *gdbstub, void *args)
 {
     /* FIXME: yes, lots of memory copy again :( */
     char packet_str[MAX_PACKET_SIZE];
-#ifdef RISCV32_EMU
-    uint32_t reg_value;
-#endif
-    size_t reg_sz = sizeof(reg_value);
+    size_t reg_value;
+    size_t reg_sz = gdbstub->arch.reg_byte;
 
-    for (int i = 0; i < ARCH_REG_NUM; i++) {
+    assert(sizeof(reg_value) >= gdbstub->arch.reg_byte);
+
+    for (int i = 0; i < gdbstub->arch.reg_num; i++) {
         reg_value = gdbstub->ops->read_reg(args, i);
         /* FIXME: we may have to consider the endian */
         hex_to_str((uint8_t *) &reg_value, &packet_str[i * reg_sz * 2], reg_sz);
@@ -82,6 +85,9 @@ static void process_mem_read(gdbstub_t *gdbstub, char *payload, void *args)
     free(mval);
 }
 
+#define TARGET_DESC \
+    "l<target version=\"1.0\"><architecture>%s</architecture></target>"
+
 void process_xfer(gdbstub_t *gdbstub, char *s)
 {
     char *name = s;
@@ -93,9 +99,11 @@ void process_xfer(gdbstub_t *gdbstub, char *s)
 #ifdef DEBUG
     printf("xfer = %s %s\n", name, args);
 #endif
-    if (!strcmp(name, "features")) {
+    if (!strcmp(name, "features") && gdbstub->arch.target_desc != NULL) {
         /* FIXME: We should check the args */
-        conn_send_pktstr(&gdbstub->priv->conn, TAEGET_DESC);
+        char buf[1024];
+        sprintf(buf, TARGET_DESC, gdbstub->arch.target_desc);
+        conn_send_pktstr(&gdbstub->priv->conn, buf);
     } else {
         conn_send_pktstr(&gdbstub->priv->conn, "");
     }

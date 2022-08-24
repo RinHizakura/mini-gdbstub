@@ -1,10 +1,6 @@
 CFLAGS = -Iinclude -Wall -Wextra -MMD -Werror
 LDFLAGS = -Wl,-rpath="$(CURDIR)" -L. -lgdbstub
 
-ifeq ("$(RV32)", "1")
-    CFLAGS +=  -DRISCV32_EMU
-endif
-
 CURDIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 OUT ?= build
 LIBGDBSTUB = libgdbstub.so
@@ -37,7 +33,6 @@ $(OUT)/%.o: %.c
 $(LIBGDBSTUB): $(LIB_OBJ)
 	$(CC) -shared $(LIB_OBJ) -o $@
 
-test: CFLAGS += -DRISCV32_EMU
 test: $(LIBGDBSTUB)
 	$(MAKE) -C emu
 

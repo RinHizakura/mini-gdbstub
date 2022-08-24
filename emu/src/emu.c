@@ -178,7 +178,13 @@ int main(int argc, char *argv[])
         return -1;
     }
 
-    if (!gdbstub_init(&emu.gdbstub, &emu_ops, "127.0.0.1:1234")) {
+    if (!gdbstub_init(&emu.gdbstub, &emu_ops,
+                      (arch_info_t){
+                          .reg_num = 33,
+                          .reg_byte = 4,
+                          .target_desc = "riscv:rv32",
+                      },
+                      "127.0.0.1:1234")) {
         fprintf(stderr, "Fail to create socket.\n");
         return -1;
     }

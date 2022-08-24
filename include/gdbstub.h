@@ -33,11 +33,21 @@ struct target_ops {
 typedef struct gdbstub_private gdbstub_private_t;
 
 typedef struct {
+    char *target_desc;
+    int reg_num;
+    size_t reg_byte;
+} arch_info_t;
+
+typedef struct {
     struct target_ops *ops;
+    arch_info_t arch;
     gdbstub_private_t *priv;
 } gdbstub_t;
 
-bool gdbstub_init(gdbstub_t *gdbstub, struct target_ops *ops, char *s);
+bool gdbstub_init(gdbstub_t *gdbstub,
+                  struct target_ops *ops,
+                  arch_info_t arch,
+                  char *s);
 bool gdbstub_run(gdbstub_t *gdbstub, void *args);
 void gdbstub_close(gdbstub_t *gdbstub);
 
