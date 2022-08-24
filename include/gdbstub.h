@@ -4,6 +4,9 @@
 #include <stdbool.h>
 #include <stddef.h>
 
+#define TARGET_RV32 "riscv:rv32"
+#define TARGET_RV64 "riscv:rv64"
+
 typedef enum {
     EVENT_NONE,
     EVENT_CONT,
