@@ -140,6 +140,7 @@ static void process_query(gdbstub_t *gdbstub, char *payload)
     }
 }
 
+#define VCONT_DESC "vCont;%s%s"
 static void process_vpacket(gdbstub_t *gdbstub, char *payload)
 {
     char *name = payload;
@@ -153,7 +154,12 @@ static void process_vpacket(gdbstub_t *gdbstub, char *payload)
 #endif
 
     if (!strcmp("Cont?", name)) {
-        conn_send_pktstr(&gdbstub->priv->conn, "vCont;c;s;");
+        char packet_str[MAX_PACKET_SIZE];
+        char *str_s = (gdbstub->ops->stepi == NULL) ? "" : "s;";
+        char *str_c = (gdbstub->ops->cont == NULL) ? "" : "c;";
+        sprintf(packet_str, VCONT_DESC, str_s, str_c);
+
+        conn_send_pktstr(&gdbstub->priv->conn, packet_str);
     } else {
         conn_send_pktstr(&gdbstub->priv->conn, "");
     }
