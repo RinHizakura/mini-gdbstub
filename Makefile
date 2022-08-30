@@ -10,7 +10,7 @@ else
     OUT := $(O)
 endif
 
-LIBGDBSTUB = libgdbstub.so
+LIBGDBSTUB = $(OUT)/libgdbstub.so
 SHELL_HACK := $(shell mkdir -p $(OUT))
 GIT_HOOKS := .git/hooks/applied
 

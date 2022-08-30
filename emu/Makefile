@@ -1,5 +1,5 @@
 CFLAGS = -I../include -Wall -Wextra
-LDFLAGS = -Wl,-rpath="$(CURDIR)/../" -L.. -ldl -lgdbstub
+LDFLAGS = -Wl,-rpath="$(CURDIR)/../build" -L../build -ldl -lgdbstub
 
 CURDIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 OUT ?= build
