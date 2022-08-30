@@ -2,10 +2,16 @@ CFLAGS = -Iinclude -Wall -Wextra -MMD -Werror
 LDFLAGS = -Wl,-rpath="$(CURDIR)" -L. -lgdbstub
 
 CURDIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
-OUT ?= build
+
+O ?= build
+ifeq ($(O), $(CURDIR)/build)
+    OUT := $(CURDIR)
+else
+    OUT := $(O)
+endif
+
 LIBGDBSTUB = libgdbstub.so
 SHELL_HACK := $(shell mkdir -p $(OUT))
-
 GIT_HOOKS := .git/hooks/applied
 
 LIBSRCS = $(shell find ./lib -name '*.c')
