@@ -165,7 +165,7 @@ static void process_vpacket(gdbstub_t *gdbstub, char *payload)
     }
 }
 
-static void process_rm_break_points(gdbstub_t *gdbstub,
+static void process_del_break_points(gdbstub_t *gdbstub,
                                     char *payload,
                                     void *args)
 {
@@ -176,7 +176,7 @@ static void process_rm_break_points(gdbstub_t *gdbstub,
     printf("remove breakpoints = %zx %zx %zx\n", type, addr, kind);
 #endif
 
-    bool ret = gdbstub->ops->rm_bp(args, addr, type);
+    bool ret = gdbstub->ops->del_bp(args, addr, type);
     if (ret)
         conn_send_pktstr(&gdbstub->priv->conn, "OK");
     else
@@ -248,8 +248,8 @@ static gdb_event_t gdbstub_process_packet(gdbstub_t *gdbstub,
         process_vpacket(gdbstub, payload);
         break;
     case 'z':
-        if (gdbstub->ops->rm_bp != NULL) {
-            process_rm_break_points(gdbstub, payload, args);
+        if (gdbstub->ops->del_bp != NULL) {
+            process_del_break_points(gdbstub, payload, args);
         } else {
             conn_send_pktstr(&gdbstub->priv->conn, "");
         }

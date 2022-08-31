@@ -30,7 +30,7 @@ struct target_ops {
     size_t (*read_reg)(void *args, int regno);
     void (*read_mem)(void *args, size_t addr, size_t len, void *val);
     bool (*set_bp)(void *args, size_t addr, bp_type_t type);
-    bool (*rm_bp)(void *args, size_t addr, bp_type_t type);
+    bool (*del_bp)(void *args, size_t addr, bp_type_t type);
 };
 
 typedef struct gdbstub_private gdbstub_private_t;
