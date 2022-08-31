@@ -1,5 +1,5 @@
 build
-*.so
+*.a
 emu/emu
 emu/test.bin
 emu/test.obj

@@ -1,5 +1,4 @@
 CFLAGS = -I../include -Wall -Wextra
-LDFLAGS = -Wl,-rpath="$(CURDIR)/../build" -L../build -ldl -lgdbstub
 
 CURDIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 OUT ?= build
@@ -10,6 +9,7 @@ CSRCS = $(shell find ./src -name '*.c')
 _COBJ =  $(notdir $(CSRCS))
 COBJ = $(_COBJ:%.c=$(OUT)/%.o)
 
+LIBGDBSTUB = ../build/libgdbstub.a
 TEST_OBJ = test.obj
 TEST_BIN = test.bin
 
@@ -20,7 +20,7 @@ all: clean $(COBJ) $(BIN) $(TEST_BIN)
 $(OUT)/%.o: %.c
 	$(CC) -c $(CFLAGS) $< -o $@
 
-$(BIN): $(COBJ)
+$(BIN): $(COBJ) $(LIBGDBSTUB)
 	$(CC) $^ -o $@ $(LDFLAGS)
 
 $(TEST_OBJ):

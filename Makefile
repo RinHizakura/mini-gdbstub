@@ -1,5 +1,4 @@
 CFLAGS = -Iinclude -Wall -Wextra -MMD -Werror
-LDFLAGS = -Wl,-rpath="$(CURDIR)" -L. -lgdbstub
 
 CURDIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 
@@ -10,7 +9,7 @@ else
     OUT := $(O)
 endif
 
-LIBGDBSTUB = $(OUT)/libgdbstub.so
+LIBGDBSTUB = $(OUT)/libgdbstub.a
 SHELL_HACK := $(shell mkdir -p $(OUT))
 GIT_HOOKS := .git/hooks/applied
 
@@ -37,7 +36,7 @@ $(OUT)/%.o: %.c
 	$(CC) -c $(CFLAGS) $< -o $@
 
 $(LIBGDBSTUB): $(LIB_OBJ)
-	$(CC) -shared $(LIB_OBJ) -o $@
+	$(AR) -rcs $@ $^
 
 test: $(LIBGDBSTUB)
 	$(MAKE) -C emu
