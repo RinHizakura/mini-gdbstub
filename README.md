@@ -1,14 +1,14 @@
 # mini-gdbstub
 
 [WIP] An implementation of the
-[GDB Remote Serial Protocol](https://sourceware.org/gdb/onlinedocs/gdb/Remote-Protocol.html#Remote-Protocol)
+[GDB Remote Serial Protocol](https://sourceware.org/gdb/onlinedocs/gdb/Remote-Protocol.html)
 to help you adding debug mode on emulator
 
 ## Usage
 
 First of all, you should build the library for the shared object file `libgdbstub.so`.
 ```
-make RV32=1
+make
 ```
 
 If you want a simple example to test the library, we give you a mock emulator to
@@ -33,3 +33,11 @@ $ riscv32-unknown-linux-gnu-gdb
 (gdb) info registers
 (gdb) continue
 ```
+
+## Reference
+### Project
+* [bet4it/gdbserver](https://github.com/bet4it/gdbserver)
+* [devbored/minigdbstub](https://github.com/devbored/minigdbstub)
+### Article
+* [Howto: GDB Remote Serial Protocol](https://www.embecosm.com/appnotes/ean4/embecosm-howto-rsp-server-ean4-issue-2.html)
+* [TLMBoy: Implementing the GDB Remote Serial Protocol](https://www.chciken.com/tlmboy/2022/04/03/gdb-z80.html)
