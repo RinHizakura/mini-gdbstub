@@ -113,7 +113,7 @@ bool emu_set_bp(void *args, size_t addr, bp_type_t type)
     return true;
 }
 
-bool emu_rm_bp(void *args, size_t addr, bp_type_t type)
+bool emu_del_bp(void *args, size_t addr, bp_type_t type)
 {
     struct emu *emu = (struct emu *) args;
 
@@ -133,7 +133,7 @@ struct target_ops emu_ops = {
     .cont = emu_cont,
     .stepi = emu_stepi,
     .set_bp = emu_set_bp,
-    .rm_bp = emu_rm_bp,
+    .del_bp = emu_del_bp,
 };
 
 int init_mem(struct mem *m, const char *filename)

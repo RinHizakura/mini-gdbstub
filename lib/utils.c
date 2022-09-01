@@ -17,7 +17,6 @@ static uint8_t char_to_hex(char ch)
     const uint8_t letter = ch & 0x40;
     const uint8_t offset = (letter >> 3) | (letter >> 6);
     return (ch + offset) & 0xf;
-
 }
 
 void str_to_hex(char *str, uint8_t *num, int bytes)
@@ -28,4 +27,22 @@ void str_to_hex(char *str, uint8_t *num, int bytes)
 
         *(num + i) = ch_high | ch_low;
     }
+}
+
+int unescape(char *msg, char *end)
+{
+    char *w = msg;
+    char *r = msg;
+    while (r < end) {
+        if (*r == '}') {
+            *w = *(r + 1) ^ 0x20;
+            r += 2;
+        } else {
+            *w = *r;
+            r += 1;
+        }
+        w += 1;
+    }
+
+    return w - msg;
 }

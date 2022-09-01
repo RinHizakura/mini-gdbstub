@@ -96,7 +96,7 @@ static void process_mem_write(gdbstub_t *gdbstub, char *payload, void *args)
     assert(sscanf(payload, "%lx,%lx", &maddr, &mlen) == 2);
 #ifdef DEBUG
     printf("mem write = addr %lx / len %lx\n", maddr, mlen);
-    printf("mem write = args %s", content);
+    printf("mem write = content %s\n", content);
 #endif
     uint8_t *mval = malloc(mlen);
     str_to_hex(content, mval, mlen);
@@ -105,6 +105,29 @@ static void process_mem_write(gdbstub_t *gdbstub, char *payload, void *args)
     free(mval);
 }
 
+static void process_mem_xwrite(gdbstub_t *gdbstub,
+                               char *payload,
+                               uint8_t *packet_end,
+                               void *args)
+{
+    size_t maddr, mlen;
+    char *content = strchr(payload, ':');
+    if (content) {
+        *content = '\0';
+        content++;
+    }
+    assert(sscanf(payload, "%lx,%lx", &maddr, &mlen) == 2);
+    assert(unescape(content, (char *) packet_end) == (int) mlen);
+#ifdef DEBUG
+    printf("mem xwrite = addr %lx / len %lx\n", maddr, mlen);
+    for (size_t i = 0; i < mlen; i++) {
+        printf("\tmem xwrite, byte %ld: %x\n", i, content[i]);
+    }
+#endif
+
+    gdbstub->ops->write_mem(args, maddr, mlen, content);
+    conn_send_pktstr(&gdbstub->priv->conn, "OK");
+}
 #define TARGET_DESC \
     "l<target version=\"1.0\"><architecture>%s</architecture></target>"
 
@@ -186,8 +209,8 @@ static void process_vpacket(gdbstub_t *gdbstub, char *payload)
 }
 
 static void process_del_break_points(gdbstub_t *gdbstub,
-                                    char *payload,
-                                    void *args)
+                                     char *payload,
+                                     void *args)
 {
     size_t type, addr, kind;
     assert(sscanf(payload, "%zx,%zx,%zx", &type, &addr, &kind) == 3);
@@ -283,6 +306,17 @@ static gdb_event_t gdbstub_process_packet(gdbstub_t *gdbstub,
     case 'M':
         if (gdbstub->ops->write_mem != NULL) {
             process_mem_write(gdbstub, payload, args);
+        } else {
+            conn_send_pktstr(&gdbstub->priv->conn, "");
+        }
+        break;
+    case 'X':
+        if (gdbstub->ops->write_mem != NULL) {
+            /* It is important for xwrite to know the end position of packet,
+             * because there're escape characters which block us interpreting
+             * the packet as a string just like other packets do. */
+            process_mem_xwrite(gdbstub, payload,
+                               &inpkt->data[inpkt->end_pos - CSUM_SIZE], args);
         } else {
             conn_send_pktstr(&gdbstub->priv->conn, "");
         }
