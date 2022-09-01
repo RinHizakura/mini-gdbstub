@@ -34,6 +34,13 @@ bool conn_init(conn_t *conn, char *addr_str, int port)
     if (conn->listen_fd < 0)
         return false;
 
+    int optval = 1;
+    if (setsockopt(conn->listen_fd, SOL_SOCKET, SO_REUSEADDR, &optval,
+                   sizeof(optval)) < 0) {
+        warn("Set sockopt fail.\n");
+        goto fail;
+    }
+
     struct sockaddr_in addr;
     addr.sin_family = AF_INET;
     addr.sin_addr.s_addr = inet_addr(addr_str);
