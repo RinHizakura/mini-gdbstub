@@ -5,7 +5,7 @@
 #include <string.h>
 #include "conn.h"
 #include "gdb_signal.h"
-#include "utils.h"
+#include "utils/translate.h"
 
 struct gdbstub_private {
     conn_t conn;

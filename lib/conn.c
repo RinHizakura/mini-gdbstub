@@ -6,6 +6,7 @@
 #include <string.h>
 #include <sys/socket.h>
 #include <unistd.h>
+#include "utils/log.h"
 
 static bool socket_poll(int socket_fd, int timeout, int events)
 {
@@ -37,15 +38,21 @@ bool conn_init(conn_t *conn, char *addr_str, int port)
     addr.sin_family = AF_INET;
     addr.sin_addr.s_addr = inet_addr(addr_str);
     addr.sin_port = htons(port);
-    if (bind(conn->listen_fd, (struct sockaddr *) &addr, sizeof(addr)) < 0)
+    if (bind(conn->listen_fd, (struct sockaddr *) &addr, sizeof(addr)) < 0) {
+        warn("Bind fail.\n");
         goto fail;
+    }
 
-    if (listen(conn->listen_fd, 1) < 0)
+    if (listen(conn->listen_fd, 1) < 0) {
+        warn("Listen fail.\n");
         goto fail;
+    }
 
     conn->socket_fd = accept(conn->listen_fd, NULL, NULL);
-    if (conn->socket_fd < 0)
+    if (conn->socket_fd < 0) {
+        warn("Accept fail.\n");
         goto fail;
+    }
 
     return true;
 
