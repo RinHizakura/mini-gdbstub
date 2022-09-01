@@ -1,5 +1,5 @@
-#ifndef GDB_SIGNAL
-#define GDG_SIGNAL
+#ifndef GDB_SIGNAL_H
+#define GDB_SIGNAL_H
 
 #define GDB_SIGNAL_TRAP 5
 

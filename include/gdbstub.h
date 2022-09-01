@@ -1,5 +1,5 @@
-#ifndef GDBSTUB
-#define GDBSTUB
+#ifndef GDBSTUB_H
+#define GDBSTUB_H
 
 #include <stdbool.h>
 #include <stddef.h>
