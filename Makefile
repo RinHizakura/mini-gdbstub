@@ -41,6 +41,9 @@ $(LIBGDBSTUB): $(LIB_OBJ)
 test: $(LIBGDBSTUB)
 	$(MAKE) -C emu
 
+gdb:
+	riscv32-unknown-elf-gdb -q -x scripts/remote-start.gdb
+
 clean:
 	$(RM) $(LIB_OBJ)
 	$(RM) $(LIBGDBSTUB)

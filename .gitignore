@@ -1,5 +1,6 @@
-build
-*.a
-emu/emu
+build/*.o
+build/*.a
+build/*.d
+emu/build
 emu/test.bin
 emu/test.obj
