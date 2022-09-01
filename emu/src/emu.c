@@ -42,6 +42,15 @@ void emu_read_mem(void *args, size_t addr, size_t len, void *val)
     memcpy(val, (void *) emu->m.mem + addr, len);
 }
 
+void emu_write_mem(void *args, size_t addr, size_t len, void *val)
+{
+    struct emu *emu = (struct emu *) args;
+    if (addr + len > MEM_SIZE) {
+        len = MEM_SIZE - addr;
+    }
+    memcpy((void *) emu->m.mem + addr, val, len);
+}
+
 #define asr_i64(value, amount) \
     (value < 0 ? ~(~value >> amount) : value >> amount)
 static void exec(struct emu *emu, uint32_t inst)
@@ -120,6 +129,7 @@ bool emu_rm_bp(void *args, size_t addr, bp_type_t type)
 struct target_ops emu_ops = {
     .read_reg = emu_read_reg,
     .read_mem = emu_read_mem,
+    .write_mem = emu_write_mem,
     .cont = emu_cont,
     .stepi = emu_stepi,
     .set_bp = emu_set_bp,

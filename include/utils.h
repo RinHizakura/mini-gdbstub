@@ -4,5 +4,6 @@
 #include <stdint.h>
 
 void hex_to_str(uint8_t *num, char *str, int bytes);
+void str_to_hex(char *str, uint8_t *num, int bytes);
 
 #endif

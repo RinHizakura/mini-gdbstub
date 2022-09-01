@@ -72,7 +72,7 @@ static void process_reg_read(gdbstub_t *gdbstub, void *args)
 static void process_mem_read(gdbstub_t *gdbstub, char *payload, void *args)
 {
     size_t maddr, mlen;
-    assert(sscanf(payload, "%lx,%lx", &maddr, &mlen));
+    assert(sscanf(payload, "%lx,%lx", &maddr, &mlen) == 2);
 #ifdef DEBUG
     printf("mem read = addr %lx / len %lx\n", maddr, mlen);
 #endif
@@ -82,6 +82,26 @@ static void process_mem_read(gdbstub_t *gdbstub, char *payload, void *args)
     gdbstub->ops->read_mem(args, maddr, mlen, mval);
     hex_to_str(mval, packet_str, mlen);
     conn_send_pktstr(&gdbstub->priv->conn, packet_str);
+    free(mval);
+}
+
+static void process_mem_write(gdbstub_t *gdbstub, char *payload, void *args)
+{
+    size_t maddr, mlen;
+    char *content = strchr(payload, ':');
+    if (content) {
+        *content = '\0';
+        content++;
+    }
+    assert(sscanf(payload, "%lx,%lx", &maddr, &mlen) == 2);
+#ifdef DEBUG
+    printf("mem write = addr %lx / len %lx\n", maddr, mlen);
+    printf("mem write = args %s", content);
+#endif
+    uint8_t *mval = malloc(mlen);
+    str_to_hex(content, mval, mlen);
+    gdbstub->ops->write_mem(args, maddr, mlen, mval);
+    conn_send_pktstr(&gdbstub->priv->conn, "OK");
     free(mval);
 }
 
@@ -259,6 +279,13 @@ static gdb_event_t gdbstub_process_packet(gdbstub_t *gdbstub,
         break;
     case 'D':
         event = EVENT_DETACH;
+        break;
+    case 'M':
+        if (gdbstub->ops->write_mem != NULL) {
+            process_mem_write(gdbstub, payload, args);
+        } else {
+            conn_send_pktstr(&gdbstub->priv->conn, "");
+        }
         break;
     case 'Z':
         if (gdbstub->ops->set_bp != NULL) {
