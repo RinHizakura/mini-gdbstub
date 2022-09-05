@@ -2,13 +2,21 @@
 #define LOG_H
 
 #include <errno.h>
+#include <stdarg.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
-void __die(const char *format, ...);
-void __info(const char *format, ...);
+static inline void log_print(const char *format, ...)
+{
+    va_list vargs;
+    va_start(vargs, format);
+    vfprintf(stderr, format, vargs);
+    va_end(vargs);
+}
 
-#define die(format, ...) __die("ERRNO: %s\n" format, strerror(errno))
-#define warn(format, ...) __info("ERRNO: %s\n" format, strerror(errno))
-#define info(format, ...) __info(format)
+#define warn(format, ...) \
+    log_print("ERRNO: %s\n" format, strerror(errno), ##__VA_ARGS__)
+#define info(format, ...) log_print(format, ##__VA_ARGS__)
 
 #endif
