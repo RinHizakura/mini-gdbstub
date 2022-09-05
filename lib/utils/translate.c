@@ -25,7 +25,7 @@ void str_to_hex(char *str, uint8_t *num, int bytes)
         uint8_t ch_high = char_to_hex(*(str + i * 2));
         uint8_t ch_low = char_to_hex(*(str + i * 2 + 1));
 
-        *(num + i) = ch_high | ch_low;
+        *(num + i) = (ch_high << 4) | ch_low;
     }
 }
 

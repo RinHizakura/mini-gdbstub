@@ -65,10 +65,11 @@ packet_t *pktbuf_pop_packet(pktbuf_t *pktbuf)
 
     /* FIXME: As you can see, we keep moving memory frequently
      * which is not a good practice. */
-    int old_pkt_size = pktbuf->end_pos;
+    int old_pkt_size = pktbuf->end_pos + 1;
     packet_t *pkt = calloc(1, sizeof(packet_t));
     memcpy(pkt->data, pktbuf->data, old_pkt_size);
     pkt->end_pos = pktbuf->end_pos;
+    pkt->data[old_pkt_size] = 0;
 
     memmove(pktbuf->data, pktbuf->data + old_pkt_size + 1,
             pktbuf->size - old_pkt_size);

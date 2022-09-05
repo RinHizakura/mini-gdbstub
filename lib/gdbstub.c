@@ -5,6 +5,7 @@
 #include <string.h>
 #include "conn.h"
 #include "gdb_signal.h"
+#include "utils/csum.h"
 #include "utils/translate.h"
 
 struct gdbstub_private {
@@ -244,12 +245,31 @@ static void process_set_break_points(gdbstub_t *gdbstub,
         conn_send_pktstr(&gdbstub->priv->conn, "E01");
 }
 
+
+static bool packet_csum_verify(packet_t *inpkt)
+{
+    /* We add extra 1 for leading '$' and minus extra 1 for trailing '#' */
+    uint8_t csum_rslt = compute_checksum((char *) inpkt->data + 1,
+                                         inpkt->end_pos - CSUM_SIZE - 1);
+    uint8_t csum_expected;
+    str_to_hex((char *) &inpkt->data[inpkt->end_pos - CSUM_SIZE + 1],
+               &csum_expected, sizeof(uint8_t));
+#ifdef DEBUG
+    printf("csum rslt = %x / csum expected = %s / ", csum_rslt,
+           &inpkt->data[inpkt->end_pos - CSUM_SIZE + 1]);
+    printf("csum expected = %x \n", csum_expected);
+#endif
+    return csum_rslt == csum_expected;
+}
+
 static gdb_event_t gdbstub_process_packet(gdbstub_t *gdbstub,
                                           packet_t *inpkt,
                                           void *args)
 {
     assert(inpkt->data[0] == '$');
-    /* TODO: check the checksum result */
+    assert(packet_csum_verify(inpkt));
+
+    /* After checking the checksum result, ignore those bytes */
     inpkt->data[inpkt->end_pos - CSUM_SIZE] = 0;
     uint8_t request = inpkt->data[1];
     char *payload = (char *) &inpkt->data[2];

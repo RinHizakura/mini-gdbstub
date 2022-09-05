@@ -6,6 +6,7 @@
 #include <string.h>
 #include <sys/socket.h>
 #include <unistd.h>
+#include "utils/csum.h"
 #include "utils/log.h"
 
 static bool socket_poll(int socket_fd, int timeout, int events)
@@ -96,14 +97,6 @@ void conn_send_str(conn_t *conn, char *str)
             break;
         len -= nwrite;
     }
-}
-
-static uint8_t compute_checksum(char *buf, size_t len)
-{
-    uint8_t csum = 0;
-    for (size_t i = 0; i < len; ++i)
-        csum += buf[i];
-    return csum;
 }
 
 void conn_send_pktstr(conn_t *conn, char *pktstr)
