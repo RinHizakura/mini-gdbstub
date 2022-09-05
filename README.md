@@ -1,38 +1,88 @@
 # mini-gdbstub
 
-[WIP] An implementation of the
+[WIP] `mini-gdbstub` is an implementation of the
 [GDB Remote Serial Protocol](https://sourceware.org/gdb/onlinedocs/gdb/Remote-Protocol.html)
-to help you adding debug mode on emulator
+to help you intergrate debugging feature to the emulator.
 
 ## Usage
 
-First of all, you should build the library for the shared object file `libgdbstub.so`.
+The very first thing you should do is to build the statically-linked library `libgdbstub.a`.
 ```
 make
 ```
 
-If you want a simple example to test the library, we give you a mock emulator to
-simply play with it.
-```
-make test
+To use the library in your project, you should include the file `gdbstub.h` first.
+Then, you have to initialize the pre-allocated structure `gdbstub_t` with `gdbstub_init`.
+
+```cpp
+bool gdbstub_init(gdbstub_t *gdbstub, struct target_ops *ops, arch_info_t arch, char *s);
 ```
 
-Once the compiles are completed, you can run the mock emulator under
-the debug mode.
-```
-$ ./emu/build/emu <binary file>
+The parameters `s` is the easiest one to understand. It is a string of the socket
+which your emulator would like to bind as gdb server.
+
+The `struct target_ops` is a structure of function pointers. Each member function represents an
+abstraction of your emulator's operation. For example, `mini-gdbstub` will use `read_mem` to
+read the memory or use `set_bp` to set breakpoint on emulator.
+
+```cpp
+struct target_ops {
+    gdb_action_t (*cont)(void *args);
+    gdb_action_t (*stepi)(void *args);
+    size_t (*read_reg)(void *args, int regno);
+    void (*read_mem)(void *args, size_t addr, size_t len, void *val);
+    void (*write_mem)(void *args, size_t addr, size_t len, void *val);
+    bool (*set_bp)(void *args, size_t addr, bp_type_t type);
+    bool (*del_bp)(void *args, size_t addr, bp_type_t type);
+};
 ```
 
-Then, you can open the GDB and iteract with the emulator by some commands!
+For `cont` and `stepi` which are used to process the execution of emulator, their return type
+should be `gdb_action_t`. You should return `ACT_RESUME` if we are going to keep on the
+debugging after the corresponding operation, otherwise you can return `ACT_SHUTDOWN` to end
+up the debugging process. `ACT_NONE` is usually used by the library to do no action.
 
-**WARNING!! most of the commands are unavailable or bug :(**
+```cpp
+typedef enum {
+    ACT_NONE,
+    ACT_RESUME,
+    ACT_SHUTDOWN,
+} gdb_action_t;
 ```
-$ riscv32-unknown-linux-gnu-gdb
-(gdb) set debug remote 1
-(gdb) target remote :1234
-(gdb) info registers
-(gdb) continue
+
+Another structure you have to declare is `arch_info_t`. In this structure, you are required
+to tell `mini-gdbstub` the register byte size `reg_byte` and the number of registers `reg_num`
+of your emulator directly. The `target_desc` is an optional member which could be
+`TARGET_RV32` or `TARGET_RV64` if the emulator is RISC-V32 or RISC-V64 architecture, otherwise
+you can just simply set it to `NULL`.
+* Although the value of `reg_num` and `reg_byte` may be known by `target_desc`, those
+two member are still required to be filled correctly
+
+```cpp
+typedef struct {
+    char *target_desc;
+    int reg_num;
+    size_t reg_byte;
+} arch_info_t;
 ```
+
+We can use `gdbstub_run` to run the emulator as gdbstub after the initialization. The `args`
+can be used to pass the argument to any function in `struct target_ops`.
+
+```cpp
+bool gdbstub_run(gdbstub_t *gdbstub, void *args);
+```
+
+When exiting from `gdbstub_run`, `gdbstub_close` should be called to recycle the resource on
+the initialization.
+
+```cpp
+void gdbstub_close(gdbstub_t *gdbstub);
+```
+
+Finally, you can build you project with the statically-linked library `libgdbstub.a` now!
+You are also recommanded to reference to the example in the directory `emu`, which is a simple
+emulator that shows you how to intergrate `mini-gdbstub` in your project.
 
 ## Reference
 ### Project
