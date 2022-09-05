@@ -5,7 +5,6 @@
 #include <stdio.h>
 #include <string.h>
 #include <sys/socket.h>
-#include <unistd.h>
 #include "utils/csum.h"
 #include "utils/log.h"
 
@@ -71,17 +70,12 @@ fail:
 
 void conn_recv_packet(conn_t *conn, pktbuf_t *pktbuf)
 {
-    uint8_t buf[4096];
-
     /* TODO: read a full GDB packet and return to handle it */
     while (!pktbuf_is_complete(pktbuf) &&
            socket_readable(conn->socket_fd, -1)) {
-        ssize_t nread = read(conn->socket_fd, buf, sizeof(buf));
+        ssize_t nread = pktbuf_fill_from_file(pktbuf, conn->socket_fd);
         if (nread == -1)
             break;
-
-        /* FIXME: A redundant moving of data here, which could be refined */
-        pktbuf_fill(pktbuf, buf, nread);
     }
 
     conn_send_str(conn, STR_ACK);

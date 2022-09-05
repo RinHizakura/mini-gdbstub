@@ -23,7 +23,7 @@ typedef struct {
 } pktbuf_t;
 
 void pktbuf_init(pktbuf_t *pktbuf);
-void pktbuf_fill(pktbuf_t *pktbuf, uint8_t *buf, ssize_t len);
+ssize_t pktbuf_fill_from_file(pktbuf_t *pktbuf, int fd);
 bool pktbuf_is_complete(pktbuf_t *pktbuf);
 packet_t *pktbuf_pop_packet(pktbuf_t *pktbuf);
 

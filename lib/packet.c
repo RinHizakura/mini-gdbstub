@@ -15,14 +15,16 @@ void pktbuf_init(pktbuf_t *pktbuf)
     pktbuf_clear(pktbuf);
 }
 
-void pktbuf_fill(pktbuf_t *pktbuf, uint8_t *buf, ssize_t len)
+ssize_t pktbuf_fill_from_file(pktbuf_t *pktbuf, int fd)
 {
-    if (len < 0)
-        return;
+    assert(MAX_PACKET_SIZE > pktbuf->size);
 
-    assert(pktbuf->size + len < MAX_PACKET_SIZE);
-    memcpy(pktbuf->data + pktbuf->size, buf, len);
-    pktbuf->size += len;
+    int left = MAX_PACKET_SIZE - pktbuf->size;
+    uint8_t *buf = pktbuf->data + pktbuf->size;
+    ssize_t nread = read(fd, buf, left);
+
+    pktbuf->size += nread;
+    return nread;
 }
 
 bool pktbuf_is_complete(pktbuf_t *pktbuf)
