@@ -33,6 +33,20 @@ size_t emu_read_reg(void *args, int regno)
     }
 }
 
+void emu_write_reg(void *args, int regno, size_t data)
+{
+    struct emu *emu = (struct emu *) args;
+
+    if (regno > 32) {
+        return;
+    } else if (regno == 32) {
+        emu->pc = data;
+    } else {
+        emu->x[regno] = data;
+    }
+}
+
+
 void emu_read_mem(void *args, size_t addr, size_t len, void *val)
 {
     struct emu *emu = (struct emu *) args;
@@ -128,6 +142,7 @@ bool emu_del_bp(void *args, size_t addr, bp_type_t type)
 
 struct target_ops emu_ops = {
     .read_reg = emu_read_reg,
+    .write_reg = emu_write_reg,
     .read_mem = emu_read_mem,
     .write_mem = emu_write_mem,
     .cont = emu_cont,

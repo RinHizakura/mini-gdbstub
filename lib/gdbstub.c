@@ -70,6 +70,28 @@ static void process_reg_read(gdbstub_t *gdbstub, void *args)
     conn_send_pktstr(&gdbstub->priv->conn, packet_str);
 }
 
+static void process_reg_write_one(gdbstub_t *gdbstub, char *payload, void *args)
+{
+    int regno;
+    size_t data;
+    char *regno_str = payload;
+    char *data_str = strchr(payload, '=');
+    if (data_str) {
+        *data_str = '\0';
+        data_str++;
+    }
+
+    assert(strlen(data_str) == gdbstub->arch.reg_byte * 2);
+    assert(sizeof(data) >= gdbstub->arch.reg_byte);
+    assert(sscanf(regno_str, "%x", &regno) == 1);
+    str_to_hex(data_str, (uint8_t *) &data, gdbstub->arch.reg_byte);
+#ifdef DEBUG
+    printf("regno %d data %lx\n", regno, data);
+#endif
+    gdbstub->ops->write_reg(args, regno, data);
+    conn_send_pktstr(&gdbstub->priv->conn, "OK");
+}
+
 static void process_mem_read(gdbstub_t *gdbstub, char *payload, void *args)
 {
     size_t maddr, mlen;
@@ -293,6 +315,13 @@ static gdb_event_t gdbstub_process_packet(gdbstub_t *gdbstub,
     case 'm':
         if (gdbstub->ops->read_mem != NULL) {
             process_mem_read(gdbstub, payload, args);
+        } else {
+            conn_send_pktstr(&gdbstub->priv->conn, "");
+        }
+        break;
+    case 'P':
+        if (gdbstub->ops->write_reg != NULL) {
+            process_reg_write_one(gdbstub, payload, args);
         } else {
             conn_send_pktstr(&gdbstub->priv->conn, "");
         }

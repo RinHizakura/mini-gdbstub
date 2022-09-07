@@ -1,4 +1,4 @@
-CFLAGS = -Iinclude -Wall -Wextra -MMD -Werror
+CFLAGS = -Iinclude -Wall -Wextra -MMD #-Werror
 
 CURDIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 
