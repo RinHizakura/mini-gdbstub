@@ -55,7 +55,6 @@ bool gdbstub_init(gdbstub_t *gdbstub,
 
 static void process_reg_read(gdbstub_t *gdbstub, void *args)
 {
-    /* FIXME: yes, lots of memory copy again :( */
     char packet_str[MAX_SEND_PACKET_SIZE];
     size_t reg_value;
     size_t reg_sz = gdbstub->arch.reg_byte;
@@ -64,7 +63,6 @@ static void process_reg_read(gdbstub_t *gdbstub, void *args)
 
     for (int i = 0; i < gdbstub->arch.reg_num; i++) {
         reg_value = gdbstub->ops->read_reg(args, i);
-        /* FIXME: we may have to consider the endian */
         hex_to_str((uint8_t *) &reg_value, &packet_str[i * reg_sz * 2], reg_sz);
     }
     conn_send_pktstr(&gdbstub->priv->conn, packet_str);
