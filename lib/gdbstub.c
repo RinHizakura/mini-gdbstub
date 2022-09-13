@@ -437,5 +437,6 @@ bool gdbstub_run(gdbstub_t *gdbstub, void *args)
 void gdbstub_close(gdbstub_t *gdbstub)
 {
     conn_close(&gdbstub->priv->conn);
+    pktbuf_destroy(&gdbstub->priv->in);
     free(gdbstub->priv);
 }
