@@ -51,7 +51,9 @@ bool pktbuf_is_complete(pktbuf_t *pktbuf)
     if (head < 0) {
         pktbuf_clear(pktbuf);
         return false;
-    } else if (head > 0) {
+    }
+
+    if (head > 0) {
         /* moving memory for a valid packet */
         memmove(pktbuf->data, pktbuf->data + head, pktbuf->size - head);
         pktbuf->size -= head;
@@ -62,10 +64,11 @@ bool pktbuf_is_complete(pktbuf_t *pktbuf)
     if (end_pos_ptr == NULL)
         return false;
 
-    /* FIXME: Move end position to the packet checksum. We should
-     * read until the checksum instead of assumming that they must exist. */
-    pktbuf->end_pos = (end_pos_ptr - pktbuf->data) + CSUM_SIZE;
-    assert(pktbuf->end_pos <= pktbuf->size);
+    int end_pos = (end_pos_ptr - pktbuf->data) + CSUM_SIZE;
+    if (end_pos > pktbuf->size)
+        return false;
+
+    pktbuf->end_pos = end_pos;
     return true;
 }
 
