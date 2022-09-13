@@ -95,13 +95,13 @@ void conn_send_str(conn_t *conn, char *str)
 
 void conn_send_pktstr(conn_t *conn, char *pktstr)
 {
-    char packet[MAX_PACKET_SIZE];
+    char packet[MAX_SEND_PACKET_SIZE];
     size_t len = strlen(pktstr);
 
     /* 2: '$' + '#'
      * 2: checksum digits(maximum)
      * 1: '\0' */
-    assert(len + 2 + CSUM_SIZE + 1 < MAX_PACKET_SIZE);
+    assert(len + 2 + CSUM_SIZE + 1 < MAX_SEND_PACKET_SIZE);
 
     packet[0] = '$';
     memcpy(packet + 1, pktstr, len);

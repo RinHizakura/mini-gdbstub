@@ -7,8 +7,6 @@
 
 #define STR_ACK "+"
 
-/* NOTE: this will be deprecated */
-#define MAX_PACKET_SIZE (0x400)
 #define CSUM_SIZE (2)
 
 typedef struct {

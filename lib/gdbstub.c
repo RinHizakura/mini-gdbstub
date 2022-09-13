@@ -56,7 +56,7 @@ bool gdbstub_init(gdbstub_t *gdbstub,
 static void process_reg_read(gdbstub_t *gdbstub, void *args)
 {
     /* FIXME: yes, lots of memory copy again :( */
-    char packet_str[MAX_PACKET_SIZE];
+    char packet_str[MAX_SEND_PACKET_SIZE];
     size_t reg_value;
     size_t reg_sz = gdbstub->arch.reg_byte;
 
@@ -99,7 +99,7 @@ static void process_mem_read(gdbstub_t *gdbstub, char *payload, void *args)
 #ifdef DEBUG
     printf("mem read = addr %lx / len %lx\n", maddr, mlen);
 #endif
-    char packet_str[MAX_PACKET_SIZE];
+    char packet_str[MAX_SEND_PACKET_SIZE];
 
     uint8_t *mval = malloc(mlen);
     gdbstub->ops->read_mem(args, maddr, mlen, mval);
@@ -167,7 +167,7 @@ void process_xfer(gdbstub_t *gdbstub, char *s)
 #endif
     if (!strcmp(name, "features") && gdbstub->arch.target_desc != NULL) {
         /* FIXME: We should check the args */
-        char buf[MAX_PACKET_SIZE];
+        char buf[MAX_SEND_PACKET_SIZE];
         sprintf(buf, TARGET_DESC, gdbstub->arch.target_desc);
         conn_send_pktstr(&gdbstub->priv->conn, buf);
     } else {
@@ -220,7 +220,7 @@ static void process_vpacket(gdbstub_t *gdbstub, char *payload)
 #endif
 
     if (!strcmp("Cont?", name)) {
-        char packet_str[MAX_PACKET_SIZE];
+        char packet_str[MAX_SEND_PACKET_SIZE];
         char *str_s = (gdbstub->ops->stepi == NULL) ? "" : "s;";
         char *str_c = (gdbstub->ops->cont == NULL) ? "" : "c;";
         sprintf(packet_str, VCONT_DESC, str_s, str_c);
