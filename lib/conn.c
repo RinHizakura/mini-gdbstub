@@ -70,7 +70,6 @@ fail:
 
 void conn_recv_packet(conn_t *conn, pktbuf_t *pktbuf)
 {
-    /* TODO: read a full GDB packet and return to handle it */
     while (!pktbuf_is_complete(pktbuf) &&
            socket_readable(conn->socket_fd, -1)) {
         ssize_t nread = pktbuf_fill_from_file(pktbuf, conn->socket_fd);
@@ -78,6 +77,8 @@ void conn_recv_packet(conn_t *conn, pktbuf_t *pktbuf)
             break;
     }
 
+    /* There must exists a complete packet in packet buffer after the loop */
+    assert(pktbuf->end_pos != -1);
     conn_send_str(conn, STR_ACK);
 }
 
