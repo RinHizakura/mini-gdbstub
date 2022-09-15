@@ -186,7 +186,6 @@ static void process_query(gdbstub_t *gdbstub, char *payload)
 #endif
 
     if (!strcmp(name, "Supported")) {
-        /* TODO: We should do handshake correctly */
         if (gdbstub->arch.target_desc != NULL)
             conn_send_pktstr(&gdbstub->priv->conn,
                              "PacketSize=1024;qXfer:features:read+");
