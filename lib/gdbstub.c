@@ -68,6 +68,22 @@ static void process_reg_read(gdbstub_t *gdbstub, void *args)
     conn_send_pktstr(&gdbstub->priv->conn, packet_str);
 }
 
+static void process_reg_read_one(gdbstub_t *gdbstub, char *payload, void *args)
+{
+    char packet_str[MAX_SEND_PACKET_SIZE];
+    int regno;
+    size_t reg_sz = gdbstub->arch.reg_byte;
+    size_t reg_value;
+
+    assert(sscanf(payload, "%x", &regno) == 1);
+    reg_value = gdbstub->ops->read_reg(args, regno);
+#ifdef DEBUG
+    printf("reg read = regno %d data %lx\n", regno, reg_value);
+#endif
+    hex_to_str((uint8_t *) &reg_value, packet_str, reg_sz);
+    conn_send_pktstr(&gdbstub->priv->conn, packet_str);
+}
+
 static void process_reg_write(gdbstub_t *gdbstub, char *payload, void *args)
 {
     size_t reg_value = 0;
@@ -333,9 +349,9 @@ static gdb_event_t gdbstub_process_packet(gdbstub_t *gdbstub,
             conn_send_pktstr(&gdbstub->priv->conn, "");
         }
         break;
-    case 'P':
-        if (gdbstub->ops->write_reg != NULL) {
-            process_reg_write_one(gdbstub, payload, args);
+    case 'p':
+        if (gdbstub->ops->read_reg != NULL) {
+            process_reg_read_one(gdbstub, payload, args);
         } else {
             conn_send_pktstr(&gdbstub->priv->conn, "");
         }
@@ -376,6 +392,13 @@ static gdb_event_t gdbstub_process_packet(gdbstub_t *gdbstub,
     case 'M':
         if (gdbstub->ops->write_mem != NULL) {
             process_mem_write(gdbstub, payload, args);
+        } else {
+            conn_send_pktstr(&gdbstub->priv->conn, "");
+        }
+        break;
+    case 'P':
+        if (gdbstub->ops->write_reg != NULL) {
+            process_reg_write_one(gdbstub, payload, args);
         } else {
             conn_send_pktstr(&gdbstub->priv->conn, "");
         }
