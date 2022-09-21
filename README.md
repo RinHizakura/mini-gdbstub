@@ -1,6 +1,6 @@
 # mini-gdbstub
 
-[WIP] `mini-gdbstub` is an implementation of the
+`mini-gdbstub` is an implementation of the
 [GDB Remote Serial Protocol](https://sourceware.org/gdb/onlinedocs/gdb/Remote-Protocol.html)
 to help you intergrate debugging feature to the emulator.
 
