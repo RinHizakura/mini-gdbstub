@@ -2,7 +2,7 @@
 
 `mini-gdbstub` is an implementation of the
 [GDB Remote Serial Protocol](https://sourceware.org/gdb/onlinedocs/gdb/Remote-Protocol.html)
-to help you intergrate debugging feature to the emulator.
+that gives your emulators debugging capabilities.
 
 ## Usage
 
@@ -21,7 +21,7 @@ bool gdbstub_init(gdbstub_t *gdbstub, struct target_ops *ops, arch_info_t arch, 
 The parameters `s` is the easiest one to understand. It is a string of the socket
 which your emulator would like to bind as gdb server.
 
-The `struct target_ops` is a structure of function pointers. Each member function represents an
+The `struct target_ops` is made up of function pointers. Each member function represents an
 abstraction of your emulator's operation. For example, `mini-gdbstub` will use `read_mem` to
 read the memory or use `set_bp` to set breakpoint on emulator.
 
@@ -39,9 +39,9 @@ struct target_ops {
 ```
 
 For `cont` and `stepi` which are used to process the execution of emulator, their return type
-should be `gdb_action_t`. You should return `ACT_RESUME` if we are going to keep on the
-debugging after the corresponding operation, otherwise you can return `ACT_SHUTDOWN` to end
-up the debugging process. `ACT_NONE` is usually used by the library to do no action.
+should be `gdb_action_t`. After performing the relevant operation, you should return `ACT_RESUME`
+to continue debugging; otherwise, return `ACT_SHUTDOWN` to finish debugging. The library
+typically uses `ACT_NONE` to take no action.
 
 ```cpp
 typedef enum {
@@ -51,13 +51,13 @@ typedef enum {
 } gdb_action_t;
 ```
 
-Another structure you have to declare is `arch_info_t`. In this structure, you are required
-to tell `mini-gdbstub` the register byte size `reg_byte` and the number of registers `reg_num`
-of your emulator directly. The `target_desc` is an optional member which could be
-`TARGET_RV32` or `TARGET_RV64` if the emulator is RISC-V32 or RISC-V64 architecture, otherwise
-you can just simply set it to `NULL`.
-* Although the value of `reg_num` and `reg_byte` may be known by `target_desc`, those
-two member are still required to be filled correctly
+Another structure you have to declare is `arch_info_t`. You must explicitly specify "mini-gdbstub"
+about size in bytes (`reg_byte`) and the number of target registers (`reg_num`) within `arch_info_t`
+structure while integrating into your emulator. The `target_desc` is an optional member which could be
+`TARGET_RV32` or `TARGET_RV64` if the emulator is RISC-V 32-bit or 64-t instruction set architecture,
+otherwise you would simply set it to `NULL`.
+* Although the value of `reg_num` and `reg_byte` may be determined by `target_desc`, those
+members are still required to be filled correctly.
 
 ```cpp
 typedef struct {
@@ -67,7 +67,7 @@ typedef struct {
 } arch_info_t;
 ```
 
-We can use `gdbstub_run` to run the emulator as gdbstub after the initialization. The `args`
+After startup, we can use `gdbstub_run` to run the emulator as gdbstub. The `args`
 can be used to pass the argument to any function in `struct target_ops`.
 
 ```cpp
@@ -82,8 +82,8 @@ void gdbstub_close(gdbstub_t *gdbstub);
 ```
 
 Finally, you can build you project with the statically-linked library `libgdbstub.a` now!
-You are also recommanded to reference to the example in the directory `emu`, which is a simple
-emulator that shows you how to intergrate `mini-gdbstub` in your project.
+Additionally, it is advised that you check the reference emulator in the directory `emu,` which
+demonstrates how to integrate `mini-gdbstub` into your project.
 
 ## Reference
 ### Project
