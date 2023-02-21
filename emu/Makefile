@@ -1,4 +1,5 @@
 CFLAGS = -I../include -Wall -Wextra
+LDFLAGS =
 
 CURDIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 OUT ?= build

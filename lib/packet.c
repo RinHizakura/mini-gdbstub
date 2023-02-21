@@ -10,15 +10,22 @@ static void pktbuf_clear(pktbuf_t *pktbuf)
 }
 
 #define DEFAULT_CAP (10)
-void pktbuf_init(pktbuf_t *pktbuf)
+bool pktbuf_init(pktbuf_t *pktbuf)
 {
     pktbuf->cap = DEFAULT_CAP;
     pktbuf->data = calloc(1, (1 << pktbuf->cap) * sizeof(uint8_t));
     pktbuf_clear(pktbuf);
+
+    if(pthread_mutex_init(&pktbuf->lock, NULL))
+        return false;
+
+    return true;
 }
 
 ssize_t pktbuf_fill_from_file(pktbuf_t *pktbuf, int fd)
 {
+    pthread_mutex_lock(&pktbuf->lock);
+
     assert((1 << pktbuf->cap) >= pktbuf->size);
 
     /* enlarge the buffer to read from file when it is full */
@@ -32,14 +39,19 @@ ssize_t pktbuf_fill_from_file(pktbuf_t *pktbuf, int fd)
     uint8_t *buf = pktbuf->data + pktbuf->size;
     ssize_t nread = read(fd, buf, left);
 
-    pktbuf->size += nread;
+    if (nread > 0)
+        pktbuf->size += nread;
+
+    pthread_mutex_unlock(&pktbuf->lock);
     return nread;
 }
 
 bool pktbuf_is_complete(pktbuf_t *pktbuf)
 {
+    bool ret = false;
     int head = -1;
 
+    pthread_mutex_lock(&pktbuf->lock);
     /* skip to the head of next packet */
     for (int i = 0; i < pktbuf->size; i++) {
         if (pktbuf->data[i] == '$') {
@@ -50,7 +62,7 @@ bool pktbuf_is_complete(pktbuf_t *pktbuf)
 
     if (head < 0) {
         pktbuf_clear(pktbuf);
-        return false;
+        goto pktbuf_is_complete_end;
     }
 
     if (head > 0) {
@@ -62,20 +74,27 @@ bool pktbuf_is_complete(pktbuf_t *pktbuf)
     /* check the end of the buffer */
     uint8_t *end_pos_ptr = memchr(pktbuf->data, '#', pktbuf->size);
     if (end_pos_ptr == NULL)
-        return false;
+        goto pktbuf_is_complete_end;
 
     int end_pos = (end_pos_ptr - pktbuf->data) + CSUM_SIZE;
     if (end_pos > pktbuf->size)
-        return false;
+        goto pktbuf_is_complete_end;
 
     pktbuf->end_pos = end_pos;
-    return true;
+    ret = true;
+
+pktbuf_is_complete_end:
+    pthread_mutex_unlock(&pktbuf->lock);
+    return ret;
 }
 
 packet_t *pktbuf_pop_packet(pktbuf_t *pktbuf)
 {
-    if (pktbuf->end_pos == -1)
+    pthread_mutex_lock(&pktbuf->lock);
+    if (pktbuf->end_pos == -1) {
+        pthread_mutex_unlock(&pktbuf->lock);
         return NULL;
+    }
 
     int old_pkt_size = pktbuf->end_pos + 1;
     packet_t *pkt = calloc(1, sizeof(packet_t) + old_pkt_size + 1);
@@ -87,10 +106,12 @@ packet_t *pktbuf_pop_packet(pktbuf_t *pktbuf)
             pktbuf->size - old_pkt_size);
     pktbuf->size -= old_pkt_size;
     pktbuf->end_pos = -1;
+    pthread_mutex_unlock(&pktbuf->lock);
     return pkt;
 }
 
 void pktbuf_destroy(pktbuf_t *pktbuf)
 {
+    pthread_mutex_destroy(&pktbuf->lock);
     free(pktbuf->data);
 }

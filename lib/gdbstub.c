@@ -10,7 +10,6 @@
 
 struct gdbstub_private {
     conn_t conn;
-    pktbuf_t in;
 };
 
 bool gdbstub_init(gdbstub_t *gdbstub,
@@ -25,7 +24,6 @@ bool gdbstub_init(gdbstub_t *gdbstub,
     gdbstub->ops = ops;
     gdbstub->arch = arch;
     gdbstub->priv = calloc(1, sizeof(struct gdbstub_private));
-    pktbuf_init(&gdbstub->priv->in);
 
     // This is a naive implementation to parse the string
     char *addr_str = strdup(s);
@@ -455,8 +453,8 @@ static void gdbstub_act_resume(gdbstub_t *gdbstub)
 bool gdbstub_run(gdbstub_t *gdbstub, void *args)
 {
     while (true) {
-        conn_recv_packet(&gdbstub->priv->conn, &gdbstub->priv->in);
-        packet_t *pkt = pktbuf_pop_packet(&gdbstub->priv->in);
+        conn_recv_packet(&gdbstub->priv->conn);
+        packet_t *pkt = conn_pop_packet(&gdbstub->priv->conn);
 #ifdef DEBUG
         printf("packet = %s\n", pkt->data);
 #endif
@@ -481,6 +479,5 @@ bool gdbstub_run(gdbstub_t *gdbstub, void *args)
 void gdbstub_close(gdbstub_t *gdbstub)
 {
     conn_close(&gdbstub->priv->conn);
-    pktbuf_destroy(&gdbstub->priv->in);
     free(gdbstub->priv);
 }

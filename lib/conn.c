@@ -28,8 +28,25 @@ static bool socket_writable(int socket_fd, int timeout)
     return socket_poll(socket_fd, timeout, POLLOUT);
 }
 
+static volatile bool thread_stop = false;
+static void *socket_reader(conn_t *conn)
+{
+    while (!__atomic_load_n(&thread_stop, __ATOMIC_RELAXED)) {
+        if (socket_readable(conn->socket_fd, -1)) {
+            ssize_t nread = pktbuf_fill_from_file(&conn->pktbuf, conn->socket_fd);
+            if (nread == -1)
+                continue;
+        }
+    }
+
+    return NULL;
+}
+
 bool conn_init(conn_t *conn, char *addr_str, int port)
 {
+    if(!pktbuf_init(&conn->pktbuf))
+        return false;
+
     conn->listen_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (conn->listen_fd < 0)
         return false;
@@ -61,6 +78,8 @@ bool conn_init(conn_t *conn, char *addr_str, int port)
         goto fail;
     }
 
+    pthread_create(&conn->tid, NULL, (void *) socket_reader, (void *) conn);
+
     return true;
 
 fail:
@@ -68,18 +87,20 @@ fail:
     return false;
 }
 
-void conn_recv_packet(conn_t *conn, pktbuf_t *pktbuf)
+void conn_recv_packet(conn_t *conn)
 {
-    while (!pktbuf_is_complete(pktbuf) &&
-           socket_readable(conn->socket_fd, -1)) {
-        ssize_t nread = pktbuf_fill_from_file(pktbuf, conn->socket_fd);
-        if (nread == -1)
-            break;
-    }
+    /* Wait until we have a complete packet, the data will be collect
+     * in the thread 'socket_reader'. */
+    while (!pktbuf_is_complete(&conn->pktbuf));
 
-    /* There must exists a complete packet in packet buffer after the loop */
-    assert(pktbuf->end_pos != -1);
     conn_send_str(conn, STR_ACK);
+}
+
+packet_t *conn_pop_packet(conn_t *conn)
+{
+    packet_t *pkt = pktbuf_pop_packet(&conn->pktbuf);
+
+    return pkt;
 }
 
 void conn_send_str(conn_t *conn, char *str)
@@ -124,6 +145,10 @@ void conn_send_pktstr(conn_t *conn, char *pktstr)
 
 void conn_close(conn_t *conn)
 {
+     __atomic_store_n(&thread_stop, true, __ATOMIC_RELAXED);
+    pthread_join(conn->tid, NULL);
+
     close(conn->socket_fd);
     close(conn->listen_fd);
+    pktbuf_destroy(&conn->pktbuf);
 }
