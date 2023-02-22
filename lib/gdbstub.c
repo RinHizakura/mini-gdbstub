@@ -10,7 +10,37 @@
 
 struct gdbstub_private {
     conn_t conn;
+
+    pthread_t tid;
+    bool async_io_enable;
 };
+
+static void async_io_enable(struct gdbstub_private *priv) {
+    __atomic_store_n(&priv->async_io_enable, true, __ATOMIC_RELAXED);
+}
+
+static void async_io_disable(struct gdbstub_private *priv) {
+    __atomic_store_n(&priv->async_io_enable, false, __ATOMIC_RELAXED);
+}
+
+static bool async_io_is_enable(struct gdbstub_private *priv) {
+    return __atomic_load_n(&priv->async_io_enable, __ATOMIC_RELAXED);
+}
+
+static volatile bool thread_stop = false;
+static void *socket_reader(gdbstub_t *gdbstub)
+{
+    /* This thread will only works when running the gdbstub routine,
+     * which won't procees on any packets. In this case, we read packet
+     * in another thread to be able to interrupt the gdbstub. */
+    while (!__atomic_load_n(&thread_stop, __ATOMIC_RELAXED)) {
+        if (async_io_is_enable(gdbstub->priv) && conn_try_recv_intr(&gdbstub->priv->conn)) {
+            /* TODO */
+        }
+    }
+
+    return NULL;
+}
 
 bool gdbstub_init(gdbstub_t *gdbstub,
                   struct target_ops *ops,
@@ -46,8 +76,11 @@ bool gdbstub_init(gdbstub_t *gdbstub,
         free(addr_str);
         return false;
     }
-
     free(addr_str);
+
+    async_io_disable(gdbstub->priv);
+    pthread_create(&gdbstub->priv->tid, NULL, (void *) socket_reader, (void *) gdbstub);
+
     return true;
 }
 
@@ -435,9 +468,9 @@ static gdb_action_t gdbstub_handle_event(gdbstub_t *gdbstub,
 
     switch (event) {
     case EVENT_CONT:
-        conn_aync_io_enable(&gdbstub->priv->conn);
+        async_io_enable(gdbstub->priv);
         act = gdbstub->ops->cont(args);
-        conn_aync_io_disable(&gdbstub->priv->conn);
+        async_io_disable(gdbstub->priv);
         break;
     case EVENT_STEP:
         act = gdbstub->ops->stepi(args);
@@ -487,6 +520,9 @@ bool gdbstub_run(gdbstub_t *gdbstub, void *args)
 
 void gdbstub_close(gdbstub_t *gdbstub)
 {
+     __atomic_store_n(&thread_stop, true, __ATOMIC_RELAXED);
+    pthread_join(gdbstub->priv->tid, NULL);
+
     conn_close(&gdbstub->priv->conn);
     free(gdbstub->priv);
 }

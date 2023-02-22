@@ -28,30 +28,6 @@ static bool socket_writable(int socket_fd, int timeout)
     return socket_poll(socket_fd, timeout, POLLOUT);
 }
 
-static volatile bool thread_stop = false;
-static void *socket_reader(conn_t *conn)
-{
-    char ch;
-
-    /* This thread only does work when running the gdbstub
-     * continue routine, which won't procees on any packet there.
-     * In this case, we read packet in the reader thread to interrupt
-     * the gdbstub. */
-    while (!__atomic_load_n(&thread_stop, __ATOMIC_RELAXED)) {
-        if (__atomic_load_n(&conn->async_io_enable, __ATOMIC_RELAXED) &&
-               socket_readable(conn->socket_fd, -1)) {
-            ssize_t nread = read(conn->socket_fd, &ch, 1);
-            if (nread != 1)
-                continue;
-
-            assert(ch == INTR_CHAR);
-            /* TODO */
-        }
-    }
-
-    return NULL;
-}
-
 bool conn_init(conn_t *conn, char *addr_str, int port)
 {
     if(!pktbuf_init(&conn->pktbuf))
@@ -88,22 +64,11 @@ bool conn_init(conn_t *conn, char *addr_str, int port)
         goto fail;
     }
 
-    conn_aync_io_disable(conn);
-    pthread_create(&conn->tid, NULL, (void *) socket_reader, (void *) conn);
-
     return true;
 
 fail:
     close(conn->listen_fd);
     return false;
-}
-
-void conn_aync_io_enable(conn_t *conn) {
-    __atomic_store_n(&conn->async_io_enable, true, __ATOMIC_RELAXED);
-}
-
-void conn_aync_io_disable(conn_t *conn) {
-    __atomic_store_n(&conn->async_io_enable, false, __ATOMIC_RELAXED);
 }
 
 void conn_recv_packet(conn_t *conn)
@@ -123,6 +88,24 @@ packet_t *conn_pop_packet(conn_t *conn)
     packet_t *pkt = pktbuf_pop_packet(&conn->pktbuf);
 
     return pkt;
+}
+
+bool conn_try_recv_intr(conn_t *conn)
+{
+    char ch;
+
+    if (!socket_readable(conn->socket_fd, 0))
+        return false;
+
+    ssize_t nread = read(conn->socket_fd, &ch, 1);
+    if (nread != 1)
+        return false;
+
+    /* FIXME: The character must be INTR_CHAR, otherwise the library
+     * may work incorrectly. However, I'm not sure if this implementation
+     * can always meet our expectation (concurrent is so hard QAQ). */
+    assert(ch == INTR_CHAR);
+    return true;
 }
 
 void conn_send_str(conn_t *conn, char *str)
@@ -167,9 +150,6 @@ void conn_send_pktstr(conn_t *conn, char *pktstr)
 
 void conn_close(conn_t *conn)
 {
-     __atomic_store_n(&thread_stop, true, __ATOMIC_RELAXED);
-    pthread_join(conn->tid, NULL);
-
     close(conn->socket_fd);
     close(conn->listen_fd);
     pktbuf_destroy(&conn->pktbuf);

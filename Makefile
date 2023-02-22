@@ -54,7 +54,7 @@ run-gdbstub: $(TEST_BIN) build-emu
 	emu/build/emu $(TEST_BIN)
 
 GDBSTUB_COMM = 127.0.0.1:1234
-run-gdb:
+run-gdb: $(TEST_OBJ)
 	riscv32-unknown-elf-gdb                     \
 		-ex "file $(TEST_OBJ)"              \
 		-ex "set debug remote 1"            \
