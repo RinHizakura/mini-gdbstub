@@ -31,11 +31,21 @@ static bool socket_writable(int socket_fd, int timeout)
 static volatile bool thread_stop = false;
 static void *socket_reader(conn_t *conn)
 {
+    char ch;
+
+    /* This thread only does work when running the gdbstub
+     * continue routine, which won't procees on any packet there.
+     * In this case, we read packet in the reader thread to interrupt
+     * the gdbstub. */
     while (!__atomic_load_n(&thread_stop, __ATOMIC_RELAXED)) {
-        if (socket_readable(conn->socket_fd, -1)) {
-            ssize_t nread = pktbuf_fill_from_file(&conn->pktbuf, conn->socket_fd);
-            if (nread == -1)
+        if (__atomic_load_n(&conn->async_io_enable, __ATOMIC_RELAXED) &&
+               socket_readable(conn->socket_fd, -1)) {
+            ssize_t nread = read(conn->socket_fd, &ch, 1);
+            if (nread != 1)
                 continue;
+
+            assert(ch == INTR_CHAR);
+            /* TODO */
         }
     }
 
@@ -78,6 +88,7 @@ bool conn_init(conn_t *conn, char *addr_str, int port)
         goto fail;
     }
 
+    conn_aync_io_disable(conn);
     pthread_create(&conn->tid, NULL, (void *) socket_reader, (void *) conn);
 
     return true;
@@ -87,11 +98,22 @@ fail:
     return false;
 }
 
+void conn_aync_io_enable(conn_t *conn) {
+    __atomic_store_n(&conn->async_io_enable, true, __ATOMIC_RELAXED);
+}
+
+void conn_aync_io_disable(conn_t *conn) {
+    __atomic_store_n(&conn->async_io_enable, false, __ATOMIC_RELAXED);
+}
+
 void conn_recv_packet(conn_t *conn)
 {
-    /* Wait until we have a complete packet, the data will be collect
-     * in the thread 'socket_reader'. */
-    while (!pktbuf_is_complete(&conn->pktbuf));
+    while (!pktbuf_is_complete(&conn->pktbuf) &&
+           socket_readable(conn->socket_fd, -1)) {
+        ssize_t nread = pktbuf_fill_from_file(&conn->pktbuf, conn->socket_fd);
+        if (nread == -1)
+            break;
+    }
 
     conn_send_str(conn, STR_ACK);
 }

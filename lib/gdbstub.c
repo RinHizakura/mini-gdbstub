@@ -431,16 +431,25 @@ static gdb_action_t gdbstub_handle_event(gdbstub_t *gdbstub,
                                          gdb_event_t event,
                                          void *args)
 {
+    gdb_action_t act = ACT_NONE;
+
     switch (event) {
     case EVENT_CONT:
-        return gdbstub->ops->cont(args);
+        conn_aync_io_enable(&gdbstub->priv->conn);
+        act = gdbstub->ops->cont(args);
+        conn_aync_io_disable(&gdbstub->priv->conn);
+        break;
     case EVENT_STEP:
-        return gdbstub->ops->stepi(args);
+        act = gdbstub->ops->stepi(args);
+        break;
     case EVENT_DETACH:
-        return ACT_SHUTDOWN;
+        act = ACT_SHUTDOWN;
+        break;
     default:
-        return ACT_NONE;
+        break;
     }
+
+    return act;
 }
 
 static void gdbstub_act_resume(gdbstub_t *gdbstub)

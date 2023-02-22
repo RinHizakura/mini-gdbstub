@@ -1,12 +1,12 @@
 #ifndef PACKET_H
 #define PACKET_H
 
-#include <pthread.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <unistd.h>
 
 #define STR_ACK "+"
+#define INTR_CHAR '\x03'
 
 #define CSUM_SIZE (2)
 
@@ -21,8 +21,6 @@ typedef struct {
     int cap;     /* the capacity (1 << cap) of the data buffer */
     int end_pos; /* the end position of the first packet in data buffer */
     uint8_t *data;
-
-    pthread_mutex_t lock; /* pktbuf will be shared between different thread */
 } pktbuf_t;
 
 bool pktbuf_init(pktbuf_t *pktbuf);
