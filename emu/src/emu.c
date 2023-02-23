@@ -18,56 +18,29 @@ struct emu {
     bool bp_is_set;
     size_t bp_addr;
 
+    bool halt;
+
     gdbstub_t gdbstub;
 };
 
-size_t emu_read_reg(void *args, int regno)
+static inline void emu_halt(struct emu *emu)
 {
-    struct emu *emu = (struct emu *) args;
-    if (regno > 32) {
-        return -1;
-    } else if (regno == 32) {
-        return emu->pc;
-    } else {
-        return emu->x[regno];
-    }
+    __atomic_store_n(&emu->halt, true, __ATOMIC_RELAXED);
 }
 
-void emu_write_reg(void *args, int regno, size_t data)
+static inline void emu_start_run(struct emu *emu)
 {
-    struct emu *emu = (struct emu *) args;
-
-    if (regno > 32) {
-        return;
-    } else if (regno == 32) {
-        emu->pc = data;
-    } else {
-        emu->x[regno] = data;
-    }
+    __atomic_store_n(&emu->halt, false, __ATOMIC_RELAXED);
 }
 
-
-void emu_read_mem(void *args, size_t addr, size_t len, void *val)
+static inline bool emu_is_halt(struct emu *emu)
 {
-    struct emu *emu = (struct emu *) args;
-    if (addr + len > MEM_SIZE) {
-        len = MEM_SIZE - addr;
-    }
-    memcpy(val, (void *) emu->m.mem + addr, len);
-}
-
-void emu_write_mem(void *args, size_t addr, size_t len, void *val)
-{
-    struct emu *emu = (struct emu *) args;
-    if (addr + len > MEM_SIZE) {
-        len = MEM_SIZE - addr;
-    }
-    memcpy((void *) emu->m.mem + addr, val, len);
+    return __atomic_load_n(&emu->halt, __ATOMIC_RELAXED);
 }
 
 #define asr_i64(value, amount) \
     (value < 0 ? ~(~value >> amount) : value >> amount)
-static void exec(struct emu *emu, uint32_t inst)
+static void emu_exec(struct emu *emu, uint32_t inst)
 {
     uint8_t opcode = inst & 0x7f;
     uint8_t rd = (inst >> 7) & 0x1f;
@@ -90,68 +63,16 @@ static void exec(struct emu *emu, uint32_t inst)
     }
 }
 
-gdb_action_t emu_cont(void *args)
+static void emu_init(struct emu *emu)
 {
-    struct emu *emu = (struct emu *) args;
-    while (emu->pc < emu->m.code_size && emu->pc != emu->bp_addr) {
-        uint32_t inst;
-        emu_read_mem(args, emu->pc, 4, &inst);
-        emu->pc += 4;
-        exec(emu, inst);
-    }
-
-    return ACT_RESUME;
+    memset(emu, 0, sizeof(struct emu));
+    emu->pc = 0;
+    emu->x[2] = MEM_SIZE;
+    emu->bp_addr = -1;
+    emu_halt(emu);
 }
 
-gdb_action_t emu_stepi(void *args)
-{
-    struct emu *emu = (struct emu *) args;
-    if (emu->pc < emu->m.code_size) {
-        uint32_t inst;
-        emu_read_mem(args, emu->pc, 4, &inst);
-        emu->pc += 4;
-        exec(emu, inst);
-    }
-
-    return ACT_RESUME;
-}
-
-bool emu_set_bp(void *args, size_t addr, bp_type_t type)
-{
-    struct emu *emu = (struct emu *) args;
-    if (type != BP_SOFTWARE || emu->bp_is_set)
-        return false;
-
-    emu->bp_is_set = true;
-    emu->bp_addr = addr;
-    return true;
-}
-
-bool emu_del_bp(void *args, size_t addr, bp_type_t type)
-{
-    struct emu *emu = (struct emu *) args;
-
-    // It's fine when there's no matching breakpoint, just doing nothing
-    if (type != BP_SOFTWARE || !emu->bp_is_set || emu->bp_addr != addr)
-        return true;
-
-    emu->bp_is_set = false;
-    emu->bp_addr = 0;
-    return true;
-}
-
-struct target_ops emu_ops = {
-    .read_reg = emu_read_reg,
-    .write_reg = emu_write_reg,
-    .read_mem = emu_read_mem,
-    .write_mem = emu_write_mem,
-    .cont = emu_cont,
-    .stepi = emu_stepi,
-    .set_bp = emu_set_bp,
-    .del_bp = emu_del_bp,
-};
-
-int init_mem(struct mem *m, const char *filename)
+static int init_mem(struct mem *m, const char *filename)
 {
     if (!filename) {
         return -1;
@@ -183,10 +104,126 @@ int init_mem(struct mem *m, const char *filename)
     return 0;
 }
 
-void free_mem(struct mem *m)
+static void free_mem(struct mem *m)
 {
     free(m->mem);
 }
+
+static size_t emu_read_reg(void *args, int regno)
+{
+    struct emu *emu = (struct emu *) args;
+    if (regno > 32) {
+        return -1;
+    } else if (regno == 32) {
+        return emu->pc;
+    } else {
+        return emu->x[regno];
+    }
+}
+
+static void emu_write_reg(void *args, int regno, size_t data)
+{
+    struct emu *emu = (struct emu *) args;
+
+    if (regno > 32) {
+        return;
+    } else if (regno == 32) {
+        emu->pc = data;
+    } else {
+        emu->x[regno] = data;
+    }
+}
+
+static void emu_read_mem(void *args, size_t addr, size_t len, void *val)
+{
+    struct emu *emu = (struct emu *) args;
+    if (addr + len > MEM_SIZE) {
+        len = MEM_SIZE - addr;
+    }
+    memcpy(val, (void *) emu->m.mem + addr, len);
+}
+
+static void emu_write_mem(void *args, size_t addr, size_t len, void *val)
+{
+    struct emu *emu = (struct emu *) args;
+    if (addr + len > MEM_SIZE) {
+        len = MEM_SIZE - addr;
+    }
+    memcpy((void *) emu->m.mem + addr, val, len);
+}
+
+static gdb_action_t emu_cont(void *args)
+{
+    struct emu *emu = (struct emu *) args;
+
+    emu_start_run(emu);
+    while (emu->pc < emu->m.code_size && emu->pc != emu->bp_addr &&
+           !emu_is_halt(emu)) {
+        uint32_t inst;
+        emu_read_mem(args, emu->pc, 4, &inst);
+        emu->pc += 4;
+        emu_exec(emu, inst);
+    }
+
+    return ACT_RESUME;
+}
+
+static gdb_action_t emu_stepi(void *args)
+{
+    struct emu *emu = (struct emu *) args;
+
+    emu_start_run(emu);
+    if (emu->pc < emu->m.code_size) {
+        uint32_t inst;
+        emu_read_mem(args, emu->pc, 4, &inst);
+        emu->pc += 4;
+        emu_exec(emu, inst);
+    }
+
+    return ACT_RESUME;
+}
+
+static bool emu_set_bp(void *args, size_t addr, bp_type_t type)
+{
+    struct emu *emu = (struct emu *) args;
+    if (type != BP_SOFTWARE || emu->bp_is_set)
+        return false;
+
+    emu->bp_is_set = true;
+    emu->bp_addr = addr;
+    return true;
+}
+
+static bool emu_del_bp(void *args, size_t addr, bp_type_t type)
+{
+    struct emu *emu = (struct emu *) args;
+
+    // It's fine when there's no matching breakpoint, just doing nothing
+    if (type != BP_SOFTWARE || !emu->bp_is_set || emu->bp_addr != addr)
+        return true;
+
+    emu->bp_is_set = false;
+    emu->bp_addr = 0;
+    return true;
+}
+
+static void emu_on_interrupt(void *args)
+{
+    struct emu *emu = (struct emu *) args;
+    emu_halt(emu);
+}
+
+struct target_ops emu_ops = {
+    .read_reg = emu_read_reg,
+    .write_reg = emu_write_reg,
+    .read_mem = emu_read_mem,
+    .write_mem = emu_write_mem,
+    .cont = emu_cont,
+    .stepi = emu_stepi,
+    .set_bp = emu_set_bp,
+    .del_bp = emu_del_bp,
+    .on_interrupt = emu_on_interrupt,
+};
 
 int main(int argc, char *argv[])
 {
@@ -195,10 +232,8 @@ int main(int argc, char *argv[])
     }
 
     struct emu emu;
-    memset(&emu, 0, sizeof(struct emu));
-    emu.pc = 0;
-    emu.x[2] = MEM_SIZE;
-    emu.bp_addr = -1;
+    emu_init(&emu);
+
     if (init_mem(&emu.m, argv[1]) == -1) {
         return -1;
     }

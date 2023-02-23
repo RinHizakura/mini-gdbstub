@@ -33,6 +33,7 @@ struct target_ops {
     void (*write_mem)(void *args, size_t addr, size_t len, void *val);
     bool (*set_bp)(void *args, size_t addr, bp_type_t type);
     bool (*del_bp)(void *args, size_t addr, bp_type_t type);
+    void (*on_interrupt)(void *args);
 };
 
 typedef struct gdbstub_private gdbstub_private_t;
