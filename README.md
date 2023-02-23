@@ -39,6 +39,10 @@ struct target_ops {
 };
 ```
 
+> *WARNING*: The method `on_interrupt` may run concurrently with `cont`, so you should
+> be careful if there're shared data between them. You will need a lock or something
+> similar to avoid data race.
+
 For `cont` and `stepi` which are used to process the execution of emulator, their return type
 should be `gdb_action_t`. After performing the relevant operation, you should return `ACT_RESUME`
 to continue debugging; otherwise, return `ACT_SHUTDOWN` to finish debugging. The library
