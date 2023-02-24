@@ -24,22 +24,18 @@ which your emulator would like to bind as gdb server.
 The `struct target_ops` is made up of function pointers. Each member function represents an
 abstraction of your emulator's operation. The following lists the requirement
 that should be provided for each method:
-* `cont`: Run the emulator until hitting breakpoint or exit.
-* `stepi`: Do one step on the emulator. You may define your own step for the emulator.
-For example, the common design is executing one instruction.
-* `read_reg`: Return the value of the register specified by `regno`.
-* `write_reg`: Write value `value` to the register specified by `regno`.
-* `read_mem`: Read the memory according to the address specified by `addr` with size `len`
-to the buffer `*val`.
-* `write_mem`: Write data in the buffer `val` with size `len` to the memory which address
-is specified by `addr`.
-* `set_bp`: Set type `type` breakpoint on the address specified by `addr`. Return true
-if we set the breakpoint successfully, otherwise return false.
-* `del_bp`: Delete type `type` breakpoint on the address specified by `addr`. Return
-true if we delete the breakpoint successfully, otherwise return false.
-* `on_interrupt`: Do something when receiving interrupt from GDB client. This method
-will run concurrently with `cont`, so you should be careful if there're shared data
-between them. You will need a lock or something similar to avoid data race.
+
+Method         | Description
+---------------|------------------
+`cont`         | Run the emulator until hitting breakpoint or exit.
+`stepi`        | Do one step on the emulator. You may define your own step for the emulator. For example, the common design is executing one instruction.
+`read_reg`     | Return the value of the register specified by `regno`.
+`write_reg`    | Write value `value` to the register specified by `regno`.
+`read_mem`     | Read the memory according to the address specified by `addr` with size `len` to the buffer `*val`.
+`write_mem`    | Write data in the buffer `val` with size `len` to the memory which address is specified by `addr`.
+`set_bp`       | Set type `type` breakpoint on the address specified by `addr`. Return true if we set the breakpoint successfully, otherwise return false.
+`del_bp`       | Delete type `type` breakpoint on the address specified by `addr`. Return true if we delete the breakpoint successfully, otherwise return false.
+`on_interrupt` | Do something when receiving interrupt from GDB client. This method will run concurrently with `cont`, so you should be careful if there're shared data between them. You will need a lock or something similar to avoid data race.
 
 ```cpp
 struct target_ops {
