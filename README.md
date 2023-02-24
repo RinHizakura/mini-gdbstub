@@ -22,8 +22,24 @@ The parameters `s` is the easiest one to understand. It is a string of the socke
 which your emulator would like to bind as gdb server.
 
 The `struct target_ops` is made up of function pointers. Each member function represents an
-abstraction of your emulator's operation. For example, `mini-gdbstub` will use `read_mem` to
-read the memory or use `set_bp` to set breakpoint on emulator.
+abstraction of your emulator's operation. The following lists the requirement
+that should be provided for each method:
+* `cont`: Run the emulator until hitting breakpoint or exit.
+* `stepi`: Do one step on the emulator. You may define your own step for the emulator.
+For example, the common design is executing one instruction.
+* `read_reg`: Return the value of the register specified by `regno`.
+* `write_reg`: Write value `value` to the register specified by `regno`.
+* `read_mem`: Read the memory according to the address specified by `addr` with size `len`
+to the buffer `*val`.
+* `write_mem`: Write data in the buffer `val` with size `len` to the memory which address
+is specified by `addr`.
+* `set_bp`: Set type `type` breakpoint on the address specified by `addr`. Return true
+if we set the breakpoint successfully, otherwise return false.
+* `del_bp`: Delete type `type` breakpoint on the address specified by `addr`. Return
+true if we delete the breakpoint successfully, otherwise return false.
+* `on_interrupt`: Do something when receiving interrupt from GDB client. This method
+will run concurrently with `cont`, so you should be careful if there're shared data
+between them. You will need a lock or something similar to avoid data race.
 
 ```cpp
 struct target_ops {
@@ -39,10 +55,6 @@ struct target_ops {
 };
 ```
 
-> *WARNING*: The method `on_interrupt` may run concurrently with `cont`, so you should
-> be careful if there're shared data between them. You will need a lock or something
-> similar to avoid data race.
-
 For `cont` and `stepi` which are used to process the execution of emulator, their return type
 should be `gdb_action_t`. After performing the relevant operation, you should return `ACT_RESUME`
 to continue debugging; otherwise, return `ACT_SHUTDOWN` to finish debugging. The library
@@ -54,6 +66,15 @@ typedef enum {
     ACT_RESUME,
     ACT_SHUTDOWN,
 } gdb_action_t;
+```
+
+For `set_bp` and `del_bp`, the type of breakpoint which should be set or deleted is described
+in the type `bp_type_t`. In fact, its value will always be `BP_SOFTWARE` currently.
+
+```
+typedef enum {
+    BP_SOFTWARE = 0,
+} bp_type_t;
 ```
 
 Another structure you have to declare is `arch_info_t`. You must explicitly specify "mini-gdbstub"
