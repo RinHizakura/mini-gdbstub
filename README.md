@@ -67,7 +67,7 @@ typedef enum {
 For `set_bp` and `del_bp`, the type of breakpoint which should be set or deleted is described
 in the type `bp_type_t`. In fact, its value will always be `BP_SOFTWARE` currently.
 
-```
+```cpp
 typedef enum {
     BP_SOFTWARE = 0,
 } bp_type_t;
