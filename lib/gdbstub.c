@@ -504,7 +504,7 @@ static void gdbstub_act_resume(gdbstub_t *gdbstub)
 bool gdbstub_run(gdbstub_t *gdbstub, void *args)
 {
     /* Create a thread to receive interrupt when running the gdbstub op */
-    if (gdbstub->ops->on_interrupt != NULL) {
+    if (gdbstub->ops->on_interrupt != NULL && gdbstub->priv->tid == 0) {
         async_io_disable(gdbstub->priv);
         pthread_create(
             &gdbstub->priv->tid, NULL, (void *) socket_reader,
