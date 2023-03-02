@@ -13,10 +13,6 @@ struct gdbstub_private {
 
     pthread_t tid;
     bool async_io_enable;
-};
-
-struct t_args {
-    gdbstub_t *gdbstub;
     void *args;
 };
 
@@ -36,10 +32,9 @@ static inline bool async_io_is_enable(struct gdbstub_private *priv)
 }
 
 static volatile bool thread_stop = false;
-static void *socket_reader(struct t_args *t_args)
+static void *socket_reader(gdbstub_t *gdbstub)
 {
-    gdbstub_t *gdbstub = t_args->gdbstub;
-    void *args = t_args->args;
+    void *args = gdbstub->priv->args;
 
     /* This thread will only works when running the gdbstub routine,
      * which won't procees on any packets. In this case, we read packet
@@ -66,7 +61,9 @@ bool gdbstub_init(gdbstub_t *gdbstub,
     gdbstub->ops = ops;
     gdbstub->arch = arch;
     gdbstub->priv = calloc(1, sizeof(struct gdbstub_private));
-
+    if (gdbstub->priv == NULL) {
+        return false;
+    }
     // This is a naive implementation to parse the string
     char *addr_str = strdup(s);
     char *port_str = strchr(addr_str, ':');
@@ -503,12 +500,14 @@ static void gdbstub_act_resume(gdbstub_t *gdbstub)
 
 bool gdbstub_run(gdbstub_t *gdbstub, void *args)
 {
+    // Bring the user-provided argument in the gdbstub_t structure
+    gdbstub->priv->args = args;
+
     /* Create a thread to receive interrupt when running the gdbstub op */
     if (gdbstub->ops->on_interrupt != NULL && gdbstub->priv->tid == 0) {
         async_io_disable(gdbstub->priv);
-        pthread_create(
-            &gdbstub->priv->tid, NULL, (void *) socket_reader,
-            (void *) &(struct t_args){.gdbstub = gdbstub, .args = args});
+        pthread_create(&gdbstub->priv->tid, NULL, (void *) socket_reader,
+                       (void *) gdbstub);
     }
 
     while (true) {
