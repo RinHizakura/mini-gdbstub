@@ -99,8 +99,14 @@ static void process_reg_read(gdbstub_t *gdbstub, void *args)
     assert(sizeof(reg_value) >= gdbstub->arch.reg_byte);
 
     for (int i = 0; i < gdbstub->arch.reg_num; i++) {
-        reg_value = gdbstub->ops->read_reg(args, i);
-        hex_to_str((uint8_t *) &reg_value, &packet_str[i * reg_sz * 2], reg_sz);
+        int ret = gdbstub->ops->read_reg(args, i, &reg_value);
+        if (!ret) {
+            hex_to_str((uint8_t *) &reg_value, &packet_str[i * reg_sz * 2],
+                       reg_sz);
+        } else {
+            sprintf(packet_str, "E%d", ret);
+            break;
+        }
     }
     conn_send_pktstr(&gdbstub->priv->conn, packet_str);
 }
@@ -113,11 +119,15 @@ static void process_reg_read_one(gdbstub_t *gdbstub, char *payload, void *args)
     size_t reg_value;
 
     assert(sscanf(payload, "%x", &regno) == 1);
-    reg_value = gdbstub->ops->read_reg(args, regno);
+    int ret = gdbstub->ops->read_reg(args, regno, &reg_value);
 #ifdef DEBUG
     printf("reg read = regno %d data %lx\n", regno, reg_value);
 #endif
-    hex_to_str((uint8_t *) &reg_value, packet_str, reg_sz);
+    if (!ret) {
+        hex_to_str((uint8_t *) &reg_value, packet_str, reg_sz);
+    } else {
+        sprintf(packet_str, "E%d", ret);
+    }
     conn_send_pktstr(&gdbstub->priv->conn, packet_str);
 }
 
@@ -133,7 +143,16 @@ static void process_reg_write(gdbstub_t *gdbstub, char *payload, void *args)
 #ifdef DEBUG
         printf("reg write = regno %d data %lx\n", i, reg_value);
 #endif
-        gdbstub->ops->write_reg(args, i, reg_value);
+        int ret = gdbstub->ops->write_reg(args, i, reg_value);
+        if (ret) {
+            /* FIXME: Even if we fail to modify this register, some
+             * registers could be writen before. This may not be
+             * an expected behavior. */
+            char packet_str[MAX_SEND_PACKET_SIZE];
+            sprintf(packet_str, "E%d", ret);
+            conn_send_pktstr(&gdbstub->priv->conn, packet_str);
+            return;
+        }
     }
     conn_send_pktstr(&gdbstub->priv->conn, "OK");
 }
@@ -156,8 +175,14 @@ static void process_reg_write_one(gdbstub_t *gdbstub, char *payload, void *args)
 #ifdef DEBUG
     printf("reg write = regno %d / data %lx\n", regno, data);
 #endif
-    gdbstub->ops->write_reg(args, regno, data);
-    conn_send_pktstr(&gdbstub->priv->conn, "OK");
+    int ret = gdbstub->ops->write_reg(args, regno, data);
+    if (!ret) {
+        conn_send_pktstr(&gdbstub->priv->conn, "OK");
+    } else {
+        char packet_str[MAX_SEND_PACKET_SIZE];
+        sprintf(packet_str, "E%d", ret);
+        conn_send_pktstr(&gdbstub->priv->conn, packet_str);
+    }
 }
 
 static void process_mem_read(gdbstub_t *gdbstub, char *payload, void *args)

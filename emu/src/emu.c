@@ -111,29 +111,35 @@ static void free_mem(struct mem *m)
     free(m->mem);
 }
 
-static size_t emu_read_reg(void *args, int regno)
+static int emu_read_reg(void *args, int regno, size_t *reg_value)
 {
     struct emu *emu = (struct emu *) args;
     if (regno > 32) {
-        return -1;
-    } else if (regno == 32) {
-        return emu->pc;
-    } else {
-        return emu->x[regno];
+        return EFAULT;
     }
+
+    if (regno == 32) {
+        *reg_value = emu->pc;
+    } else {
+        *reg_value = emu->x[regno];
+    }
+    return 0;
 }
 
-static void emu_write_reg(void *args, int regno, size_t data)
+static int emu_write_reg(void *args, int regno, size_t data)
 {
     struct emu *emu = (struct emu *) args;
 
     if (regno > 32) {
-        return;
-    } else if (regno == 32) {
+        return EFAULT;
+    }
+
+    if (regno == 32) {
         emu->pc = data;
     } else {
         emu->x[regno] = data;
     }
+    return 0;
 }
 
 static int emu_read_mem(void *args, size_t addr, size_t len, void *val)
