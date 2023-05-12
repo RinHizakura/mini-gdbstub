@@ -170,8 +170,12 @@ static void process_mem_read(gdbstub_t *gdbstub, char *payload, void *args)
     char packet_str[MAX_SEND_PACKET_SIZE];
 
     uint8_t *mval = malloc(mlen);
-    gdbstub->ops->read_mem(args, maddr, mlen, mval);
-    hex_to_str(mval, packet_str, mlen);
+    int ret = gdbstub->ops->read_mem(args, maddr, mlen, mval);
+    if (!ret) {
+        hex_to_str(mval, packet_str, mlen);
+    } else {
+        sprintf(packet_str, "E%d", ret);
+    }
     conn_send_pktstr(&gdbstub->priv->conn, packet_str);
     free(mval);
 }
@@ -191,8 +195,15 @@ static void process_mem_write(gdbstub_t *gdbstub, char *payload, void *args)
 #endif
     uint8_t *mval = malloc(mlen);
     str_to_hex(content, mval, mlen);
-    gdbstub->ops->write_mem(args, maddr, mlen, mval);
-    conn_send_pktstr(&gdbstub->priv->conn, "OK");
+    int ret = gdbstub->ops->write_mem(args, maddr, mlen, mval);
+
+    if (!ret) {
+        conn_send_pktstr(&gdbstub->priv->conn, "OK");
+    } else {
+        char packet_str[MAX_SEND_PACKET_SIZE];
+        sprintf(packet_str, "E%d", ret);
+        conn_send_pktstr(&gdbstub->priv->conn, packet_str);
+    }
     free(mval);
 }
 

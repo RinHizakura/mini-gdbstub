@@ -29,8 +29,8 @@ struct target_ops {
     gdb_action_t (*stepi)(void *args);
     size_t (*read_reg)(void *args, int regno);
     void (*write_reg)(void *args, int regno, size_t value);
-    void (*read_mem)(void *args, size_t addr, size_t len, void *val);
-    void (*write_mem)(void *args, size_t addr, size_t len, void *val);
+    int (*read_mem)(void *args, size_t addr, size_t len, void *val);
+    int (*write_mem)(void *args, size_t addr, size_t len, void *val);
     bool (*set_bp)(void *args, size_t addr, bp_type_t type);
     bool (*del_bp)(void *args, size_t addr, bp_type_t type);
     void (*on_interrupt)(void *args);

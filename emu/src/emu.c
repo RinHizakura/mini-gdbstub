@@ -1,7 +1,9 @@
+#include <errno.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
 #include "gdbstub.h"
 
 #define MEM_SIZE (1024)
@@ -134,22 +136,24 @@ static void emu_write_reg(void *args, int regno, size_t data)
     }
 }
 
-static void emu_read_mem(void *args, size_t addr, size_t len, void *val)
+static int emu_read_mem(void *args, size_t addr, size_t len, void *val)
 {
     struct emu *emu = (struct emu *) args;
     if (addr + len > MEM_SIZE) {
-        len = MEM_SIZE - addr;
+        return EFAULT;
     }
     memcpy(val, (void *) emu->m.mem + addr, len);
+    return 0;
 }
 
-static void emu_write_mem(void *args, size_t addr, size_t len, void *val)
+static int emu_write_mem(void *args, size_t addr, size_t len, void *val)
 {
     struct emu *emu = (struct emu *) args;
     if (addr + len > MEM_SIZE) {
-        len = MEM_SIZE - addr;
+        return EFAULT;
     }
     memcpy((void *) emu->m.mem + addr, val, len);
+    return 0;
 }
 
 static gdb_action_t emu_cont(void *args)
