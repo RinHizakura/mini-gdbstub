@@ -29,10 +29,10 @@ Method         | Description
 ---------------|------------------
 `cont`         | Run the emulator until hitting breakpoint or exit.
 `stepi`        | Do one step on the emulator. You may define your own step for the emulator. For example, the common design is executing one instruction.
-`read_reg`     | Return the value of the register specified by `regno`.
-`write_reg`    | Write value `value` to the register specified by `regno`.
-`read_mem`     | Read the memory according to the address specified by `addr` with size `len` to the buffer `*val`.
-`write_mem`    | Write data in the buffer `val` with size `len` to the memory which address is specified by `addr`.
+`read_reg`     | Read the value of the register specified by `regno` to `*value`. Return zero if the operation success, otherwise return an errno for the corresponding error.
+`write_reg`    | Write value `value` to the register specified by `regno`. Return zero if the operation success, otherwise return an errno for the corresponding error.
+`read_mem`     | Read the memory according to the address specified by `addr` with size `len` to the buffer `*val`. Return zero if the operation success, otherwise return an errno for the corresponding error.
+`write_mem`    | Write data in the buffer `val` with size `len` to the memory which address is specified by `addr`. Return zero if the operation success, otherwise return an errno for the corresponding error.
 `set_bp`       | Set type `type` breakpoint on the address specified by `addr`. Return true if we set the breakpoint successfully, otherwise return false.
 `del_bp`       | Delete type `type` breakpoint on the address specified by `addr`. Return true if we delete the breakpoint successfully, otherwise return false.
 `on_interrupt` | Do something when receiving interrupt from GDB client. This method will run concurrently with `cont`, so you should be careful if there're shared data between them. You will need a lock or something similar to avoid data race.
@@ -41,10 +41,10 @@ Method         | Description
 struct target_ops {
     gdb_action_t (*cont)(void *args);
     gdb_action_t (*stepi)(void *args);
-    size_t (*read_reg)(void *args, int regno);
-    void (*write_reg)(void *args, int regno, size_t value);
-    void (*read_mem)(void *args, size_t addr, size_t len, void *val);
-    void (*write_mem)(void *args, size_t addr, size_t len, void *val);
+    int (*read_reg)(void *args, int regno, size_t *value);
+    int (*write_reg)(void *args, int regno, size_t value);
+    int (*read_mem)(void *args, size_t addr, size_t len, void *val);
+    int (*write_mem)(void *args, size_t addr, size_t len, void *val);
     bool (*set_bp)(void *args, size_t addr, bp_type_t type);
     bool (*del_bp)(void *args, size_t addr, bp_type_t type);
     void (*on_interrupt)(void *args);
