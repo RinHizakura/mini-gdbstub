@@ -67,18 +67,20 @@ bool gdbstub_init(gdbstub_t *gdbstub,
     // This is a naive implementation to parse the string
     char *addr_str = strdup(s);
     char *port_str = strchr(addr_str, ':');
-    if (addr_str == NULL || port_str == NULL) {
+    int port = 0;
+    if (addr_str == NULL) {
         free(addr_str);
         return false;
     }
 
-    *port_str = '\0';
-    port_str += 1;
+    if (port_str != NULL) {
+        *port_str = '\0';
+        port_str += 1;
 
-    int port;
-    if (sscanf(port_str, "%d", &port) <= 0) {
-        free(addr_str);
-        return false;
+        if (sscanf(port_str, "%d", &port) <= 0) {
+            free(addr_str);
+            return false;
+        }
     }
 
     if (!conn_init(&gdbstub->priv->conn, addr_str, port)) {

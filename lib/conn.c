@@ -1,10 +1,13 @@
 #include "conn.h"
 #include <arpa/inet.h>
 #include <assert.h>
+#include <netinet/in.h>
 #include <poll.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <sys/un.h>
+#include <unistd.h>
 #include "utils/csum.h"
 #include "utils/log.h"
 
@@ -33,24 +36,45 @@ bool conn_init(conn_t *conn, char *addr_str, int port)
     if(!pktbuf_init(&conn->pktbuf))
         return false;
 
-    conn->listen_fd = socket(AF_INET, SOCK_STREAM, 0);
-    if (conn->listen_fd < 0)
-        return false;
+    struct in_addr addr_ip;
+    int is_inet_addr = inet_aton(addr_str, &addr_ip);
+    if (is_inet_addr == 1) {
+        if (!port) {
+            warn("Wrong port.\n");
+            return false;
+        }
+        struct sockaddr_in addr;
+        addr.sin_family = AF_INET;
+        addr.sin_addr.s_addr = addr_ip.s_addr;
+        addr.sin_port = htons(port);
+        conn->listen_fd = socket(AF_INET, SOCK_STREAM, 0);
+        if (conn->listen_fd < 0)
+            return false;
 
-    int optval = 1;
-    if (setsockopt(conn->listen_fd, SOL_SOCKET, SO_REUSEADDR, &optval,
-                   sizeof(optval)) < 0) {
-        warn("Set sockopt fail.\n");
-        goto fail;
-    }
+        int optval = 1;
+        if (setsockopt(conn->listen_fd, SOL_SOCKET, SO_REUSEADDR, &optval,
+                    sizeof(optval)) < 0) {
+            warn("Set sockopt fail.\n");
+            goto fail;
+        }
 
-    struct sockaddr_in addr;
-    addr.sin_family = AF_INET;
-    addr.sin_addr.s_addr = inet_addr(addr_str);
-    addr.sin_port = htons(port);
-    if (bind(conn->listen_fd, (struct sockaddr *) &addr, sizeof(addr)) < 0) {
-        warn("Bind fail.\n");
-        goto fail;
+        if (bind(conn->listen_fd, (struct sockaddr *) &addr, sizeof(addr)) < 0) {
+            warn("Bind fail.\n");
+            goto fail;
+        }
+    } else {
+        struct sockaddr_un addr;
+        addr.sun_family = AF_UNIX;
+        strncpy(addr.sun_path, addr_str, sizeof(addr.sun_path) - 1);
+        unlink(addr_str);
+        conn->listen_fd = socket(AF_UNIX, SOCK_STREAM, 0);
+        if (conn->listen_fd < 0)
+            return false;
+
+        if (bind(conn->listen_fd, (struct sockaddr *) &addr, sizeof(addr)) < 0) {
+            warn("Bind fail.\n");
+            goto fail;
+        }
     }
 
     if (listen(conn->listen_fd, 1) < 0) {
