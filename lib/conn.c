@@ -37,11 +37,7 @@ bool conn_init(conn_t *conn, char *addr_str, int port)
         return false;
 
     struct in_addr addr_ip;
-    if (inet_aton(addr_str, &addr_ip) == 1) {
-        if (!port) {
-            warn("Missing port.\n");
-            return false;
-        }
+    if (inet_aton(addr_str, &addr_ip) != 0) {
         struct sockaddr_in addr;
         addr.sin_family = AF_INET;
         addr.sin_addr.s_addr = addr_ip.s_addr;
