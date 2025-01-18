@@ -92,6 +92,10 @@ bool gdbstub_init(gdbstub_t *gdbstub,
     return true;
 }
 
+#define SEND_ERR(gdbstub, err) conn_send_pktstr(&gdbstub->priv->conn, err)
+#define SEND_EPERM(gdbstub) SEND_ERR(gdbstub, "E01")
+#define SEND_EINVAL(gdbstub) SEND_ERR(gdbstub, "E22")
+
 static void process_reg_read(gdbstub_t *gdbstub, void *args)
 {
     char packet_str[MAX_SEND_PACKET_SIZE];
@@ -351,7 +355,7 @@ static void process_del_break_points(gdbstub_t *gdbstub,
     if (ret)
         conn_send_pktstr(&gdbstub->priv->conn, "OK");
     else
-        conn_send_pktstr(&gdbstub->priv->conn, "E01");
+        SEND_EINVAL(gdbstub);
 }
 
 static void process_set_break_points(gdbstub_t *gdbstub,
@@ -369,7 +373,7 @@ static void process_set_break_points(gdbstub_t *gdbstub,
     if (ret)
         conn_send_pktstr(&gdbstub->priv->conn, "OK");
     else
-        conn_send_pktstr(&gdbstub->priv->conn, "E01");
+        SEND_EINVAL(gdbstub);
 }
 
 
@@ -407,28 +411,28 @@ static gdb_event_t gdbstub_process_packet(gdbstub_t *gdbstub,
         if (gdbstub->ops->cont != NULL) {
             event = EVENT_CONT;
         } else {
-            conn_send_pktstr(&gdbstub->priv->conn, "");
+            SEND_EPERM(gdbstub);
         }
         break;
     case 'g':
         if (gdbstub->ops->read_reg != NULL) {
             process_reg_read(gdbstub, args);
         } else {
-            conn_send_pktstr(&gdbstub->priv->conn, "");
+            SEND_EPERM(gdbstub);
         }
         break;
     case 'm':
         if (gdbstub->ops->read_mem != NULL) {
             process_mem_read(gdbstub, payload, args);
         } else {
-            conn_send_pktstr(&gdbstub->priv->conn, "");
+            SEND_EPERM(gdbstub);
         }
         break;
     case 'p':
         if (gdbstub->ops->read_reg != NULL) {
             process_reg_read_one(gdbstub, payload, args);
         } else {
-            conn_send_pktstr(&gdbstub->priv->conn, "");
+            SEND_EPERM(gdbstub);
         }
         break;
     case 'q':
@@ -438,7 +442,7 @@ static gdb_event_t gdbstub_process_packet(gdbstub_t *gdbstub,
         if (gdbstub->ops->stepi != NULL) {
             event = EVENT_STEP;
         } else {
-            conn_send_pktstr(&gdbstub->priv->conn, "");
+            SEND_EPERM(gdbstub);
         }
         break;
     case 'v':
@@ -448,7 +452,7 @@ static gdb_event_t gdbstub_process_packet(gdbstub_t *gdbstub,
         if (gdbstub->ops->del_bp != NULL) {
             process_del_break_points(gdbstub, payload, args);
         } else {
-            conn_send_pktstr(&gdbstub->priv->conn, "");
+            SEND_EPERM(gdbstub);
         }
         break;
     case '?':
@@ -461,21 +465,21 @@ static gdb_event_t gdbstub_process_packet(gdbstub_t *gdbstub,
         if (gdbstub->ops->write_reg != NULL) {
             process_reg_write(gdbstub, payload, args);
         } else {
-            conn_send_pktstr(&gdbstub->priv->conn, "");
+            SEND_EPERM(gdbstub);
         }
         break;
     case 'M':
         if (gdbstub->ops->write_mem != NULL) {
             process_mem_write(gdbstub, payload, args);
         } else {
-            conn_send_pktstr(&gdbstub->priv->conn, "");
+            SEND_EPERM(gdbstub);
         }
         break;
     case 'P':
         if (gdbstub->ops->write_reg != NULL) {
             process_reg_write_one(gdbstub, payload, args);
         } else {
-            conn_send_pktstr(&gdbstub->priv->conn, "");
+            SEND_EPERM(gdbstub);
         }
         break;
     case 'X':
@@ -486,14 +490,14 @@ static gdb_event_t gdbstub_process_packet(gdbstub_t *gdbstub,
             process_mem_xwrite(gdbstub, payload,
                                &inpkt->data[inpkt->end_pos - CSUM_SIZE], args);
         } else {
-            conn_send_pktstr(&gdbstub->priv->conn, "");
+            SEND_EPERM(gdbstub);
         }
         break;
     case 'Z':
         if (gdbstub->ops->set_bp != NULL) {
             process_set_break_points(gdbstub, payload, args);
         } else {
-            conn_send_pktstr(&gdbstub->priv->conn, "");
+            SEND_EPERM(gdbstub);
         }
         break;
     default:
