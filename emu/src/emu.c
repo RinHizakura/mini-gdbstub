@@ -250,6 +250,7 @@ int main(int argc, char *argv[])
 
     if (!gdbstub_init(&emu.gdbstub, &emu_ops,
                       (arch_info_t){
+                          .smp = 1,
                           .reg_num = 33,
                           .reg_byte = 4,
                           .target_desc = TARGET_RV32,
