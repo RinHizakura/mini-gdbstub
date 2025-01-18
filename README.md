@@ -73,9 +73,13 @@ typedef enum {
 } bp_type_t;
 ```
 
-Another structure you have to declare is `arch_info_t`. You must explicitly specify "mini-gdbstub"
-about size in bytes (`reg_byte`) and the number of target registers (`reg_num`) within `arch_info_t`
-structure while integrating into your emulator. The `target_desc` is an optional member which could be
+Another structure you have to declare is `arch_info_t`. You must explicitly specify about the
+following field within `arch_info_t` while integrating into your emulator:
+* `smp`: Number of target's CPU
+* `reg_byte`: Register's size in bytes
+* `reg_num`: Number of target's registers
+
+The `target_desc` is an optional member which could be
 `TARGET_RV32` or `TARGET_RV64` if the emulator is RISC-V 32-bit or 64-t instruction set architecture,
 otherwise you would simply set it to `NULL`.
 * Although the value of `reg_num` and `reg_byte` may be determined by `target_desc`, those
@@ -84,6 +88,7 @@ members are still required to be filled correctly.
 ```cpp
 typedef struct {
     char *target_desc;
+    int smp;
     int reg_num;
     size_t reg_byte;
 } arch_info_t;
