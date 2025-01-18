@@ -40,6 +40,7 @@ typedef struct gdbstub_private gdbstub_private_t;
 
 typedef struct {
     char *target_desc;
+    int smp;
     int reg_num;
     size_t reg_byte;
 } arch_info_t;

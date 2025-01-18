@@ -310,6 +310,30 @@ static void process_query(gdbstub_t *gdbstub, char *payload)
         process_xfer(gdbstub, args);
     } else if (!strcmp(name, "Symbol")) {
         conn_send_pktstr(&gdbstub->priv->conn, "OK");
+    } else if (!strcmp(name, "fThreadInfo")) {
+        /* Assume at least 1 CPU if user didn't specific
+         * the CPU counts */
+        int smp = gdbstub->arch.smp ? gdbstub->arch.smp : 1;
+        char *ptr;
+        char packet_str[MAX_SEND_PACKET_SIZE];
+        char tid[6];
+
+        /* Make assumption on the CPU counts, so
+         * that we can use the buffer very simply. */
+        assert(smp < 10000);
+
+        packet_str[0] = 'm';
+        ptr = packet_str + 1;
+        for (int i = 0; i < smp; i++)
+        {
+            sprintf(tid, "%04d,", i);
+            memcpy(ptr, tid, 5);
+            ptr += 5;
+        }
+        *ptr = 0;
+        conn_send_pktstr(&gdbstub->priv->conn, packet_str);
+    } else if (!strcmp(name, "sThreadInfo")) {
+        conn_send_pktstr(&gdbstub->priv->conn, "l");
     } else {
         conn_send_pktstr(&gdbstub->priv->conn, "");
     }
