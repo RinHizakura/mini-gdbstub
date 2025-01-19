@@ -340,10 +340,11 @@ static void process_query(gdbstub_t *gdbstub, char *payload)
 }
 
 #define VCONT_DESC "vCont;%s%s"
-static void process_vpacket(gdbstub_t *gdbstub, char *payload)
+static gdb_event_t process_vpacket(gdbstub_t *gdbstub, char *payload)
 {
+    gdb_event_t event = EVENT_NONE;
     char *name = payload;
-    char *args = strchr(payload, ':');
+    char *args = strchr(payload, ';');
     if (args) {
         *args = '\0';
         args++;
@@ -352,16 +353,35 @@ static void process_vpacket(gdbstub_t *gdbstub, char *payload)
     printf("vpacket = %s %s\n", name, args);
 #endif
 
-    if (!strcmp("Cont?", name)) {
+    if (!strcmp("Cont", name)) {
+        switch (args[0]) {
+        case 'c':
+            if (gdbstub->ops->cont != NULL) {
+                event = EVENT_CONT;
+            } else {
+                SEND_EPERM(gdbstub);
+            }
+            break;
+        case 's':
+            if (gdbstub->ops->stepi != NULL) {
+                event = EVENT_STEP;
+            } else {
+                SEND_EPERM(gdbstub);
+            }
+            break;
+        }
+    } else if (!strcmp("Cont?", name)) {
         char packet_str[MAX_SEND_PACKET_SIZE];
-        char *str_s = (gdbstub->ops->stepi == NULL) ? "" : "s;";
-        char *str_c = (gdbstub->ops->cont == NULL) ? "" : "c;";
+        char *str_s = (gdbstub->ops->stepi == NULL) ? "" : "s;S;";
+        char *str_c = (gdbstub->ops->cont == NULL) ? "" : "c;C;";
         sprintf(packet_str, VCONT_DESC, str_s, str_c);
 
         conn_send_pktstr(&gdbstub->priv->conn, packet_str);
     } else {
         conn_send_pktstr(&gdbstub->priv->conn, "");
     }
+
+    return event;
 }
 
 static void process_del_break_points(gdbstub_t *gdbstub,
@@ -400,7 +420,6 @@ static void process_set_break_points(gdbstub_t *gdbstub,
         SEND_EINVAL(gdbstub);
 }
 
-
 static bool packet_csum_verify(packet_t *inpkt)
 {
     /* We add extra 1 for leading '$' and minus extra 1 for trailing '#' */
@@ -431,13 +450,6 @@ static gdb_event_t gdbstub_process_packet(gdbstub_t *gdbstub,
     gdb_event_t event = EVENT_NONE;
 
     switch (request) {
-    case 'c':
-        if (gdbstub->ops->cont != NULL) {
-            event = EVENT_CONT;
-        } else {
-            SEND_EPERM(gdbstub);
-        }
-        break;
     case 'g':
         if (gdbstub->ops->read_reg != NULL) {
             process_reg_read(gdbstub, args);
@@ -462,15 +474,8 @@ static gdb_event_t gdbstub_process_packet(gdbstub_t *gdbstub,
     case 'q':
         process_query(gdbstub, payload);
         break;
-    case 's':
-        if (gdbstub->ops->stepi != NULL) {
-            event = EVENT_STEP;
-        } else {
-            SEND_EPERM(gdbstub);
-        }
-        break;
     case 'v':
-        process_vpacket(gdbstub, payload);
+        event = process_vpacket(gdbstub, payload);
         break;
     case 'z':
         if (gdbstub->ops->del_bp != NULL) {
