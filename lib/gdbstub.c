@@ -285,19 +285,28 @@ void process_xfer(gdbstub_t *gdbstub, char *s)
     }
 }
 
-static void process_query(gdbstub_t *gdbstub, char *payload)
+static void process_query(gdbstub_t *gdbstub, char *payload, void *args)
 {
+    char packet_str[MAX_SEND_PACKET_SIZE];
     char *name = payload;
-    char *args = strchr(payload, ':');
-    if (args) {
-        *args = '\0';
-        args++;
+    char *qargs = strchr(payload, ':');
+    if (qargs) {
+        *qargs = '\0';
+        qargs++;
     }
 #ifdef DEBUG
-    printf("query = %s %s\n", name, args);
+    printf("query = %s %s\n", name, qargs);
 #endif
 
-    if (!strcmp(name, "Supported")) {
+    if (!strcmp(name, "C")) {
+        if (gdbstub->ops->get_cpu != NULL) {
+            int cpuid = gdbstub->ops->get_cpu(args);
+            sprintf(packet_str, "QC%04d", cpuid);
+            conn_send_pktstr(&gdbstub->priv->conn, packet_str);
+        }
+        else
+            conn_send_pktstr(&gdbstub->priv->conn, "");
+    } else if (!strcmp(name, "Supported")) {
         if (gdbstub->arch.target_desc != NULL)
             conn_send_pktstr(&gdbstub->priv->conn,
                              "PacketSize=1024;qXfer:features:read+");
@@ -307,7 +316,7 @@ static void process_query(gdbstub_t *gdbstub, char *payload)
         /* assume attached to an existing process */
         conn_send_pktstr(&gdbstub->priv->conn, "1");
     } else if (!strcmp(name, "Xfer")) {
-        process_xfer(gdbstub, args);
+        process_xfer(gdbstub, qargs);
     } else if (!strcmp(name, "Symbol")) {
         conn_send_pktstr(&gdbstub->priv->conn, "OK");
     } else if (!strcmp(name, "fThreadInfo")) {
@@ -315,8 +324,7 @@ static void process_query(gdbstub_t *gdbstub, char *payload)
          * the CPU counts */
         int smp = gdbstub->arch.smp ? gdbstub->arch.smp : 1;
         char *ptr;
-        char packet_str[MAX_SEND_PACKET_SIZE];
-        char tid[6];
+        char cpuid_str[6];
 
         /* Make assumption on the CPU counts, so
          * that we can use the buffer very simply. */
@@ -324,10 +332,10 @@ static void process_query(gdbstub_t *gdbstub, char *payload)
 
         packet_str[0] = 'm';
         ptr = packet_str + 1;
-        for (int i = 0; i < smp; i++)
+        for (int cpuid = 0; cpuid < smp; cpuid++)
         {
-            sprintf(tid, "%04d,", i);
-            memcpy(ptr, tid, 5);
+            sprintf(cpuid_str, "%04d,", cpuid);
+            memcpy(ptr, cpuid_str, 5);
             ptr += 5;
         }
         *ptr = 0;
@@ -339,7 +347,42 @@ static void process_query(gdbstub_t *gdbstub, char *payload)
     }
 }
 
+static inline gdb_event_t process_vcont(gdbstub_t *gdbstub, char *args)
+{
+    gdb_event_t event = EVENT_NONE;
+
+    switch (args[0]) {
+    case 'c':
+        if (gdbstub->ops->cont != NULL)
+            event = EVENT_CONT;
+        else
+            SEND_EPERM(gdbstub);
+        break;
+    case 's':
+        if (gdbstub->ops->stepi != NULL)
+            event = EVENT_STEP;
+        else
+            SEND_EPERM(gdbstub);
+        break;
+    default:
+        SEND_EPERM(gdbstub);
+        break;
+    }
+
+    return event;
+}
+
 #define VCONT_DESC "vCont;%s%s"
+static inline void process_vcont_support(gdbstub_t *gdbstub)
+{
+    char packet_str[MAX_SEND_PACKET_SIZE];
+    char *str_s = (gdbstub->ops->stepi == NULL) ? "" : "s;S;";
+    char *str_c = (gdbstub->ops->cont == NULL) ? "" : "c;C;";
+    sprintf(packet_str, VCONT_DESC, str_s, str_c);
+
+    conn_send_pktstr(&gdbstub->priv->conn, packet_str);
+}
+
 static gdb_event_t process_vpacket(gdbstub_t *gdbstub, char *payload)
 {
     gdb_event_t event = EVENT_NONE;
@@ -353,33 +396,12 @@ static gdb_event_t process_vpacket(gdbstub_t *gdbstub, char *payload)
     printf("vpacket = %s %s\n", name, args);
 #endif
 
-    if (!strcmp("Cont", name)) {
-        switch (args[0]) {
-        case 'c':
-            if (gdbstub->ops->cont != NULL) {
-                event = EVENT_CONT;
-            } else {
-                SEND_EPERM(gdbstub);
-            }
-            break;
-        case 's':
-            if (gdbstub->ops->stepi != NULL) {
-                event = EVENT_STEP;
-            } else {
-                SEND_EPERM(gdbstub);
-            }
-            break;
-        }
-    } else if (!strcmp("Cont?", name)) {
-        char packet_str[MAX_SEND_PACKET_SIZE];
-        char *str_s = (gdbstub->ops->stepi == NULL) ? "" : "s;S;";
-        char *str_c = (gdbstub->ops->cont == NULL) ? "" : "c;C;";
-        sprintf(packet_str, VCONT_DESC, str_s, str_c);
-
-        conn_send_pktstr(&gdbstub->priv->conn, packet_str);
-    } else {
+    if (!strcmp("Cont", name))
+        event = process_vcont(gdbstub, args);
+    else if (!strcmp("Cont?", name))
+        process_vcont_support(gdbstub);
+    else
         conn_send_pktstr(&gdbstub->priv->conn, "");
-    }
 
     return event;
 }
@@ -418,6 +440,20 @@ static void process_set_break_points(gdbstub_t *gdbstub,
         conn_send_pktstr(&gdbstub->priv->conn, "OK");
     else
         SEND_EINVAL(gdbstub);
+}
+
+static void process_set_cpu(gdbstub_t *gdbstub,
+                            char *payload,
+                            void *args)
+{
+    int cpuid;
+    /* We don't support deprecated Hc packet, GDB
+     * should send only send vCont;c and vCont;s here. */
+    if (payload[0] == 'g') {
+        assert(sscanf(payload, "g%d", &cpuid) == 1);
+        gdbstub->ops->set_cpu(args, cpuid);
+    }
+    conn_send_pktstr(&gdbstub->priv->conn, "OK");
 }
 
 static bool packet_csum_verify(packet_t *inpkt)
@@ -472,7 +508,7 @@ static gdb_event_t gdbstub_process_packet(gdbstub_t *gdbstub,
         }
         break;
     case 'q':
-        process_query(gdbstub, payload);
+        process_query(gdbstub, payload, args);
         break;
     case 'v':
         event = process_vpacket(gdbstub, payload);
@@ -493,6 +529,13 @@ static gdb_event_t gdbstub_process_packet(gdbstub_t *gdbstub,
     case 'G':
         if (gdbstub->ops->write_reg != NULL) {
             process_reg_write(gdbstub, payload, args);
+        } else {
+            SEND_EPERM(gdbstub);
+        }
+        break;
+    case 'H':
+        if (gdbstub->ops->set_cpu != NULL) {
+            process_set_cpu(gdbstub, payload, args);
         } else {
             SEND_EPERM(gdbstub);
         }
