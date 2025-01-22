@@ -554,6 +554,11 @@ static gdb_event_t gdbstub_process_packet(gdbstub_t *gdbstub,
             SEND_EPERM(gdbstub);
         }
         break;
+    case 'T':
+        /* FIXME: Assume all CPUs are alive here, any exception case
+         * that user may want to handle? */
+        conn_send_pktstr(&gdbstub->priv->conn, "OK");
+        break;
     case 'X':
         if (gdbstub->ops->write_mem != NULL) {
             /* It is important for xwrite to know the end position of packet,
