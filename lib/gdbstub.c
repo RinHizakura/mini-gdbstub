@@ -261,8 +261,8 @@ static void process_mem_xwrite(gdbstub_t *gdbstub,
     gdbstub->ops->write_mem(args, maddr, mlen, content);
     conn_send_pktstr(&gdbstub->priv->conn, "OK");
 }
-#define TARGET_DESC \
-    "l<target version=\"1.0\"><architecture>%s</architecture></target>"
+
+#define MAX_DATA_PAYLOAD ( MAX_SEND_PACKET_SIZE - (2 + CSUM_SIZE + 2))
 
 void process_xfer(gdbstub_t *gdbstub, char *s)
 {
@@ -276,9 +276,22 @@ void process_xfer(gdbstub_t *gdbstub, char *s)
     printf("xfer = %s %s\n", name, args);
 #endif
     if (!strcmp(name, "features") && gdbstub->arch.target_desc != NULL) {
-        /* FIXME: We should check the args */
+        /* check the args */
+        char *action =  strtok(args, ":");
+        assert(strcmp(action, "read") == 0);
+        char *filename = strtok(NULL, ":");
+        assert(strcmp(filename, "target.xml") == 0);
+
         char buf[MAX_SEND_PACKET_SIZE];
-        sprintf(buf, TARGET_DESC, gdbstub->arch.target_desc);
+        char *hex_str = strtok(NULL, ":");
+        int offset = 0;
+        int total_len = strlen(gdbstub->arch.target_desc);
+        sscanf(hex_str,"%x",&offset);
+
+        // Determine if the remaining data fits within the buffer
+        buf[0]=(total_len - offset < MAX_DATA_PAYLOAD ) ? 'l' : 'm';
+        snprintf(buf + 1 ,MAX_DATA_PAYLOAD ,"%s", gdbstub->arch.target_desc+offset);
+
         conn_send_pktstr(&gdbstub->priv->conn, buf);
     } else {
         conn_send_pktstr(&gdbstub->priv->conn, "");
