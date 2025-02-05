@@ -36,6 +36,8 @@ Method         | Description
 `set_bp`       | Set type `type` breakpoint on the address specified by `addr`. Return true if we set the breakpoint successfully, otherwise return false.
 `del_bp`       | Delete type `type` breakpoint on the address specified by `addr`. Return true if we delete the breakpoint successfully, otherwise return false.
 `on_interrupt` | Do something when receiving interrupt from GDB client. This method will run concurrently with `cont`, so you should be careful if there're shared data between them. You will need a lock or something similar to avoid data race.
+`set_cpu`      | Set the debug target CPU to `cpuid`
+`get_cpu`      | Get the current debug target CPU `cpuid` as return value
 
 ```cpp
 struct target_ops {
@@ -48,6 +50,9 @@ struct target_ops {
     bool (*set_bp)(void *args, size_t addr, bp_type_t type);
     bool (*del_bp)(void *args, size_t addr, bp_type_t type);
     void (*on_interrupt)(void *args);
+
+    void (*set_cpu)(void *args, int cpuid);
+    int (*get_cpu)(void *args);
 };
 ```
 
