@@ -275,7 +275,7 @@ void process_xfer(gdbstub_t *gdbstub, char *s)
     printf("xfer = %s %s\n", name, args);
 #endif
     if (!strcmp(name, "features") && gdbstub->arch.target_desc != NULL) {
-        /* check the args */
+        /* Check the args */
         char *action = strtok(args, ":");
         assert(strcmp(action, "read") == 0);
         char *annex = strtok(NULL, ":");
