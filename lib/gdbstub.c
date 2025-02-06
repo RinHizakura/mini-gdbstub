@@ -261,8 +261,7 @@ static void process_mem_xwrite(gdbstub_t *gdbstub,
     gdbstub->ops->write_mem(args, maddr, mlen, content);
     conn_send_pktstr(&gdbstub->priv->conn, "OK");
 }
-#define TARGET_DESC \
-    "l<target version=\"1.0\"><architecture>%s</architecture></target>"
+
 
 void process_xfer(gdbstub_t *gdbstub, char *s)
 {
@@ -276,9 +275,25 @@ void process_xfer(gdbstub_t *gdbstub, char *s)
     printf("xfer = %s %s\n", name, args);
 #endif
     if (!strcmp(name, "features") && gdbstub->arch.target_desc != NULL) {
-        /* FIXME: We should check the args */
+        /* check the args */
+        char *action = strtok(args, ":");
+        assert(strcmp(action, "read") == 0);
+        char *annex = strtok(NULL, ":");
+        assert(strcmp(annex, "target.xml") == 0);
+
         char buf[MAX_SEND_PACKET_SIZE];
-        sprintf(buf, TARGET_DESC, gdbstub->arch.target_desc);
+        int offset = 0, length = 0;
+        sscanf(strtok(NULL, ":"), "%x,%x", &offset, &length);
+
+        int total_len = strlen(gdbstub->arch.target_desc);
+        int payload_length =
+            MAX_DATA_PAYLOAD > length ? length : MAX_DATA_PAYLOAD;
+
+        // Determine if the remaining data fits within the buffer
+        buf[0] = (total_len - offset < payload_length) ? 'l' : 'm';
+        snprintf(buf + 1, payload_length, "%s",
+                 gdbstub->arch.target_desc + offset);
+
         conn_send_pktstr(&gdbstub->priv->conn, buf);
     } else {
         conn_send_pktstr(&gdbstub->priv->conn, "");
@@ -303,8 +318,7 @@ static void process_query(gdbstub_t *gdbstub, char *payload, void *args)
             int cpuid = gdbstub->ops->get_cpu(args);
             sprintf(packet_str, "QC%04d", cpuid);
             conn_send_pktstr(&gdbstub->priv->conn, packet_str);
-        }
-        else
+        } else
             conn_send_pktstr(&gdbstub->priv->conn, "");
     } else if (!strcmp(name, "Supported")) {
         if (gdbstub->arch.target_desc != NULL)
@@ -332,8 +346,7 @@ static void process_query(gdbstub_t *gdbstub, char *payload, void *args)
 
         packet_str[0] = 'm';
         ptr = packet_str + 1;
-        for (int cpuid = 0; cpuid < smp; cpuid++)
-        {
+        for (int cpuid = 0; cpuid < smp; cpuid++) {
             sprintf(cpuid_str, "%04d,", cpuid);
             memcpy(ptr, cpuid_str, 5);
             ptr += 5;
@@ -442,9 +455,7 @@ static void process_set_break_points(gdbstub_t *gdbstub,
         SEND_EINVAL(gdbstub);
 }
 
-static void process_set_cpu(gdbstub_t *gdbstub,
-                            char *payload,
-                            void *args)
+static void process_set_cpu(gdbstub_t *gdbstub, char *payload, void *args)
 {
     int cpuid;
     /* We don't support deprecated Hc packet, GDB

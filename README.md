@@ -85,8 +85,10 @@ following field within `arch_info_t` while integrating into your emulator:
 * `reg_num`: Number of target's registers
 
 The `target_desc` is an optional member which could be
-`TARGET_RV32` or `TARGET_RV64` if the emulator is RISC-V 32-bit or 64-t instruction set architecture,
-otherwise you would simply set it to `NULL`.
+`TARGET_RV32` or `TARGET_RV64` if the emulator is RISC-V 32-bit or 64-t instruction set architecture.
+Alternatively, it can be a custom target description document string used by gdb. 
+If none of these apply, simply set it to NULL.
+
 * Although the value of `reg_num` and `reg_byte` may be determined by `target_desc`, those
 members are still required to be filled correctly.
 
