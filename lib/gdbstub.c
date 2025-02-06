@@ -262,7 +262,6 @@ static void process_mem_xwrite(gdbstub_t *gdbstub,
     conn_send_pktstr(&gdbstub->priv->conn, "OK");
 }
 
-#define MAX_DATA_PAYLOAD ( MAX_SEND_PACKET_SIZE - (2 + CSUM_SIZE + 2))
 
 void process_xfer(gdbstub_t *gdbstub, char *s)
 {
@@ -279,18 +278,19 @@ void process_xfer(gdbstub_t *gdbstub, char *s)
         /* check the args */
         char *action =  strtok(args, ":");
         assert(strcmp(action, "read") == 0);
-        char *filename = strtok(NULL, ":");
-        assert(strcmp(filename, "target.xml") == 0);
+        char *annex = strtok(NULL, ":");
+        assert(strcmp(annex, "target.xml") == 0);
 
         char buf[MAX_SEND_PACKET_SIZE];
-        char *hex_str = strtok(NULL, ":");
-        int offset = 0;
+        int offset = 0, length = 0;
+        sscanf(strtok(NULL, ":"), "%x,%x", &offset, &length);
+
         int total_len = strlen(gdbstub->arch.target_desc);
-        sscanf(hex_str,"%x",&offset);
+        int payload_length = MAX_DATA_PAYLOAD > length ? length : MAX_DATA_PAYLOAD; 
 
         // Determine if the remaining data fits within the buffer
-        buf[0]=(total_len - offset < MAX_DATA_PAYLOAD ) ? 'l' : 'm';
-        snprintf(buf + 1 ,MAX_DATA_PAYLOAD ,"%s", gdbstub->arch.target_desc+offset);
+        buf[0]=(total_len - offset < payload_length ) ? 'l' : 'm';
+        snprintf(buf + 1 ,payload_length ,"%s", gdbstub->arch.target_desc+offset);
 
         conn_send_pktstr(&gdbstub->priv->conn, buf);
     } else {
