@@ -99,53 +99,55 @@ bool gdbstub_init(gdbstub_t *gdbstub,
 static void process_reg_read(gdbstub_t *gdbstub, void *args)
 {
     char packet_str[MAX_SEND_PACKET_SIZE];
-    size_t reg_value;
-    size_t reg_sz = gdbstub->arch.reg_byte;
-
-    assert(sizeof(reg_value) >= gdbstub->arch.reg_byte);
+    void *reg_value = NULL;
 
     for (int i = 0; i < gdbstub->arch.reg_num; i++) {
-        int ret = gdbstub->ops->read_reg(args, i, &reg_value);
+        size_t reg_sz = gdbstub->ops->get_reg_rize(i);
+        assert((reg_value = malloc(reg_sz)) != NULL);
+        int ret = gdbstub->ops->read_reg(args, i, reg_value);
         if (!ret) {
-            hex_to_str((uint8_t *) &reg_value, &packet_str[i * reg_sz * 2],
+            hex_to_str((uint8_t *) reg_value, &packet_str[i * reg_sz * 2],
                        reg_sz);
         } else {
             sprintf(packet_str, "E%d", ret);
+            free(reg_value);
             break;
         }
     }
     conn_send_pktstr(&gdbstub->priv->conn, packet_str);
+    free(reg_value);
 }
 
 static void process_reg_read_one(gdbstub_t *gdbstub, char *payload, void *args)
 {
     char packet_str[MAX_SEND_PACKET_SIZE];
     int regno;
-    size_t reg_sz = gdbstub->arch.reg_byte;
-    size_t reg_value;
+    void *reg_value;
 
     assert(sscanf(payload, "%x", &regno) == 1);
-    int ret = gdbstub->ops->read_reg(args, regno, &reg_value);
+    size_t reg_sz = gdbstub->ops->get_reg_rize(regno);
+    assert((reg_value = malloc(reg_sz)) != NULL);
+    int ret = gdbstub->ops->read_reg(args, regno, reg_value);
 #ifdef DEBUG
     printf("reg read = regno %d data %lx\n", regno, reg_value);
 #endif
     if (!ret) {
-        hex_to_str((uint8_t *) &reg_value, packet_str, reg_sz);
+        hex_to_str((uint8_t *) reg_value, packet_str, reg_sz);
     } else {
         sprintf(packet_str, "E%d", ret);
     }
     conn_send_pktstr(&gdbstub->priv->conn, packet_str);
+    free(reg_value);
 }
 
 static void process_reg_write(gdbstub_t *gdbstub, char *payload, void *args)
 {
-    size_t reg_value = 0;
-    size_t reg_sz = gdbstub->arch.reg_byte;
-
-    assert(sizeof(reg_value) >= gdbstub->arch.reg_byte);
+    void *reg_value = NULL;
 
     for (int i = 0; i < gdbstub->arch.reg_num; i++) {
-        str_to_hex(&payload[i * reg_sz * 2], (uint8_t *) &reg_value, reg_sz);
+        size_t reg_sz = gdbstub->ops->get_reg_rize(i);
+        assert((reg_value = malloc(reg_sz)) != NULL);
+        str_to_hex(&payload[i * reg_sz * 2], (uint8_t *) reg_value, reg_sz);
 #ifdef DEBUG
         printf("reg write = regno %d data %lx\n", i, reg_value);
 #endif
@@ -157,16 +159,18 @@ static void process_reg_write(gdbstub_t *gdbstub, char *payload, void *args)
             char packet_str[MAX_SEND_PACKET_SIZE];
             sprintf(packet_str, "E%d", ret);
             conn_send_pktstr(&gdbstub->priv->conn, packet_str);
+            free(reg_value);
             return;
         }
     }
     conn_send_pktstr(&gdbstub->priv->conn, "OK");
+    free(reg_value);
 }
 
 static void process_reg_write_one(gdbstub_t *gdbstub, char *payload, void *args)
 {
     int regno;
-    size_t data;
+    void *data;
     char *regno_str = payload;
     char *data_str = strchr(payload, '=');
     if (data_str) {
@@ -174,10 +178,12 @@ static void process_reg_write_one(gdbstub_t *gdbstub, char *payload, void *args)
         data_str++;
     }
 
-    assert(strlen(data_str) == gdbstub->arch.reg_byte * 2);
-    assert(sizeof(data) >= gdbstub->arch.reg_byte);
     assert(sscanf(regno_str, "%x", &regno) == 1);
-    str_to_hex(data_str, (uint8_t *) &data, gdbstub->arch.reg_byte);
+    size_t reg_sz = gdbstub->ops->get_reg_rize(regno);
+    assert((data = malloc(reg_sz)) != NULL);
+    assert(strlen(data_str) == reg_sz * 2);
+    
+    str_to_hex(data_str, (uint8_t *) data, reg_sz);
 #ifdef DEBUG
     printf("reg write = regno %d / data %lx\n", regno, data);
 #endif
@@ -189,6 +195,7 @@ static void process_reg_write_one(gdbstub_t *gdbstub, char *payload, void *args)
         sprintf(packet_str, "E%d", ret);
         conn_send_pktstr(&gdbstub->priv->conn, packet_str);
     }
+    free(data);
 }
 
 static void process_mem_read(gdbstub_t *gdbstub, char *payload, void *args)
