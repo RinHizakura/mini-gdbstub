@@ -29,6 +29,7 @@ Method         | Description
 ---------------|------------------
 `cont`         | Run the emulator until hitting breakpoint or exit.
 `stepi`        | Do one step on the emulator. You may define your own step for the emulator. For example, the common design is executing one instruction.
+`get_reg_rize` | Get the register size in bytes for the register specified by `regno` as a return value.
 `read_reg`     | Read the value of the register specified by `regno` to `*value`. Return zero if the operation success, otherwise return an errno for the corresponding error.
 `write_reg`    | Write value `value` to the register specified by `regno`. Return zero if the operation success, otherwise return an errno for the corresponding error.
 `read_mem`     | Read the memory according to the address specified by `addr` with size `len` to the buffer `*val`. Return zero if the operation success, otherwise return an errno for the corresponding error.
@@ -43,8 +44,9 @@ Method         | Description
 struct target_ops {
     gdb_action_t (*cont)(void *args);
     gdb_action_t (*stepi)(void *args);
-    int (*read_reg)(void *args, int regno, size_t *value);
-    int (*write_reg)(void *args, int regno, size_t value);
+    size_t (*get_reg_rize)(int regno);
+    int (*read_reg)(void *args, int regno, void *value);
+    int (*write_reg)(void *args, int regno, void* value);
     int (*read_mem)(void *args, size_t addr, size_t len, void *val);
     int (*write_mem)(void *args, size_t addr, size_t len, void *val);
     bool (*set_bp)(void *args, size_t addr, bp_type_t type);
@@ -81,15 +83,14 @@ typedef enum {
 Another structure you have to declare is `arch_info_t`. You must explicitly specify about the
 following field within `arch_info_t` while integrating into your emulator:
 * `smp`: Number of target's CPU
-* `reg_byte`: Register's size in bytes
 * `reg_num`: Number of target's registers
 
 The `target_desc` is an optional member which could be
-`TARGET_RV32` or `TARGET_RV64` if the emulator is RISC-V 32-bit or 64-bit instruction
-set architecture. Alternatively, it can be a custom target description document
+`TARGET_RV32`,  `TARGET_RV64` if the emulator is RISC-V 32-bit or 64-bit instruction
+set architecture or `TARGET_X86_64` if the emulator is x86_64 instruction set architecture. Alternatively, it can be a custom target description document
 string used by gdb. If none of these apply, simply set it to NULL.
 
-* Although the value of `reg_num` and `reg_byte` may be determined by `target_desc`, those
+* Although the value of `reg_num` may be determined by `target_desc`, those
 members are still required to be filled correctly.
 
 ```cpp
@@ -97,7 +98,6 @@ typedef struct {
     char *target_desc;
     int smp;
     int reg_num;
-    size_t reg_byte;
 } arch_info_t;
 ```
 
