@@ -47,16 +47,17 @@ static void *socket_reader(gdbstub_t *gdbstub)
      * in another thread to be able to interrupt the gdbstub. */
     while (!__atomic_load_n(&thread_stop, __ATOMIC_RELAXED)) {
         /* Wait until async I/O is enabled or thread is stopped */
-        while (!async_io_is_enable(priv) && !__atomic_load_n(&thread_stop, __ATOMIC_RELAXED)) {
+        while (!async_io_is_enable(priv) &&
+               !__atomic_load_n(&thread_stop, __ATOMIC_RELAXED)) {
             pthread_mutex_lock(&priv->mutex);
             pthread_cond_wait(&priv->cond, &priv->mutex);
             pthread_mutex_unlock(&priv->mutex);
         }
-        
+
         if (__atomic_load_n(&thread_stop, __ATOMIC_RELAXED)) {
             break;
         }
-        
+
         if (conn_try_recv_intr(&priv->conn)) {
             gdbstub->ops->on_interrupt(args);
         }
@@ -689,12 +690,12 @@ void gdbstub_close(gdbstub_t *gdbstub)
     /* Use thread ID to make sure the thread was created */
     if (gdbstub->priv->tid != 0) {
         __atomic_store_n(&thread_stop, true, __ATOMIC_RELAXED);
-        
+
         // Signal the condition to wake up the thread if it's waiting
         pthread_mutex_lock(&gdbstub->priv->mutex);
         pthread_cond_signal(&gdbstub->priv->cond);
         pthread_mutex_unlock(&gdbstub->priv->mutex);
-        
+
         pthread_join(gdbstub->priv->tid, NULL);
     }
 
