@@ -182,7 +182,7 @@ static void process_reg_write_one(gdbstub_t *gdbstub, char *payload, void *args)
     size_t reg_sz = gdbstub->ops->get_reg_rize(regno);
     assert((data = malloc(reg_sz)) != NULL);
     assert(strlen(data_str) == reg_sz * 2);
-    
+
     str_to_hex(data_str, (uint8_t *) data, reg_sz);
 #ifdef DEBUG
     printf("reg write = regno %d / data %lx\n", regno, data);

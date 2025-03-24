@@ -8,8 +8,9 @@
     "<target version=\"1.0\"><architecture>riscv:rv32</architecture></target>"
 #define TARGET_RV64 \
     "<target version=\"1.0\"><architecture>riscv:rv64</architecture></target>"
-    #define TARGET_X86_64 \
-    "<target version=\"1.0\"><architecture>i386:x86-64</architecture></target>"
+#define TARGET_X86_64 \
+    "<target "        \
+    "version=\"1.0\"><architecture>i386:x86-64</architecture></target>"
 
 typedef enum {
     EVENT_NONE,
@@ -33,7 +34,7 @@ struct target_ops {
     gdb_action_t (*stepi)(void *args);
     size_t (*get_reg_rize)(int regno);
     int (*read_reg)(void *args, int regno, void *value);
-    int (*write_reg)(void *args, int regno, void* value);
+    int (*write_reg)(void *args, int regno, void *value);
     int (*read_mem)(void *args, size_t addr, size_t len, void *val);
     int (*write_mem)(void *args, size_t addr, size_t len, void *val);
     bool (*set_bp)(void *args, size_t addr, bp_type_t type);
