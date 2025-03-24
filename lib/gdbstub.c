@@ -13,12 +13,17 @@ struct gdbstub_private {
 
     pthread_t tid;
     bool async_io_enable;
+    pthread_mutex_t mutex;
+    pthread_cond_t cond;
     void *args;
 };
 
 static inline void async_io_enable(struct gdbstub_private *priv)
 {
     __atomic_store_n(&priv->async_io_enable, true, __ATOMIC_RELAXED);
+    pthread_mutex_lock(&priv->mutex);
+    pthread_cond_signal(&priv->cond);
+    pthread_mutex_unlock(&priv->mutex);
 }
 
 static inline void async_io_disable(struct gdbstub_private *priv)
@@ -35,13 +40,24 @@ static volatile bool thread_stop = false;
 static void *socket_reader(gdbstub_t *gdbstub)
 {
     void *args = gdbstub->priv->args;
+    struct gdbstub_private *priv = gdbstub->priv;
 
     /* This thread will only works when running the gdbstub routine,
      * which won't procees on any packets. In this case, we read packet
      * in another thread to be able to interrupt the gdbstub. */
     while (!__atomic_load_n(&thread_stop, __ATOMIC_RELAXED)) {
-        if (async_io_is_enable(gdbstub->priv) &&
-            conn_try_recv_intr(&gdbstub->priv->conn)) {
+        /* Wait until async I/O is enabled or thread is stopped */
+        while (!async_io_is_enable(priv) && !__atomic_load_n(&thread_stop, __ATOMIC_RELAXED)) {
+            pthread_mutex_lock(&priv->mutex);
+            pthread_cond_wait(&priv->cond, &priv->mutex);
+            pthread_mutex_unlock(&priv->mutex);
+        }
+        
+        if (__atomic_load_n(&thread_stop, __ATOMIC_RELAXED)) {
+            break;
+        }
+        
+        if (conn_try_recv_intr(&priv->conn)) {
             gdbstub->ops->on_interrupt(args);
         }
     }
@@ -64,6 +80,10 @@ bool gdbstub_init(gdbstub_t *gdbstub,
     if (gdbstub->priv == NULL) {
         return false;
     }
+
+    pthread_mutex_init(&gdbstub->priv->mutex, NULL);
+    pthread_cond_init(&gdbstub->priv->cond, NULL);
+
     // This is a naive implementation to parse the string
     char *addr_str = strdup(s);
     char *port_str = strchr(addr_str, ':');
@@ -669,8 +689,17 @@ void gdbstub_close(gdbstub_t *gdbstub)
     /* Use thread ID to make sure the thread was created */
     if (gdbstub->priv->tid != 0) {
         __atomic_store_n(&thread_stop, true, __ATOMIC_RELAXED);
+        
+        // Signal the condition to wake up the thread if it's waiting
+        pthread_mutex_lock(&gdbstub->priv->mutex);
+        pthread_cond_signal(&gdbstub->priv->cond);
+        pthread_mutex_unlock(&gdbstub->priv->mutex);
+        
         pthread_join(gdbstub->priv->tid, NULL);
     }
+
+    pthread_mutex_destroy(&gdbstub->priv->mutex);
+    pthread_cond_destroy(&gdbstub->priv->cond);
 
     conn_close(&gdbstub->priv->conn);
     free(gdbstub->priv);
