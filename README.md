@@ -14,7 +14,7 @@ make
 To use the library in your project, you should include the file `gdbstub.h` first.
 Then, you have to initialize the pre-allocated structure `gdbstub_t` with `gdbstub_init`.
 
-```cpp
+```c
 bool gdbstub_init(gdbstub_t *gdbstub, struct target_ops *ops, arch_info_t arch, char *s);
 ```
 
@@ -40,7 +40,7 @@ Method         | Description
 `set_cpu`      | Set the debug target CPU to `cpuid`.
 `get_cpu`      | Get the current debug target CPU `cpuid` as return value.
 
-```cpp
+```c
 struct target_ops {
     gdb_action_t (*cont)(void *args);
     gdb_action_t (*stepi)(void *args);
@@ -63,7 +63,7 @@ should be `gdb_action_t`. After performing the relevant operation, you should re
 to continue debugging; otherwise, return `ACT_SHUTDOWN` to finish debugging. The library
 typically uses `ACT_NONE` to take no action.
 
-```cpp
+```c
 typedef enum {
     ACT_NONE,
     ACT_RESUME,
@@ -74,7 +74,7 @@ typedef enum {
 For `set_bp` and `del_bp`, the type of breakpoint which should be set or deleted is described
 in the type `bp_type_t`. In fact, its value will always be `BP_SOFTWARE` currently.
 
-```cpp
+```c
 typedef enum {
     BP_SOFTWARE = 0,
 } bp_type_t;
@@ -93,7 +93,7 @@ string used by gdb. If none of these apply, simply set it to NULL.
 * Although the value of `reg_num` may be determined by `target_desc`, those
 members are still required to be filled correctly.
 
-```cpp
+```c
 typedef struct {
     char *target_desc;
     int smp;
@@ -104,14 +104,14 @@ typedef struct {
 After startup, we can use `gdbstub_run` to run the emulator as gdbstub. The `args`
 can be used to pass the argument to any function in `struct target_ops`.
 
-```cpp
+```c
 bool gdbstub_run(gdbstub_t *gdbstub, void *args);
 ```
 
 When exiting from `gdbstub_run`, `gdbstub_close` should be called to recycle the resource on
 the initialization.
 
-```cpp
+```c
 void gdbstub_close(gdbstub_t *gdbstub);
 ```
 
