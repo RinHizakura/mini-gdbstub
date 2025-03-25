@@ -96,60 +96,107 @@ bool gdbstub_init(gdbstub_t *gdbstub,
 #define SEND_EPERM(gdbstub) SEND_ERR(gdbstub, "E01")
 #define SEND_EINVAL(gdbstub) SEND_ERR(gdbstub, "E22")
 
+static void *get_register_buffer(size_t reg_sz,
+                                 size_t *local_buf,
+                                 int *malloc_used)
+{
+    *malloc_used = 0;
+    if (reg_sz <= sizeof(size_t)) {
+        /* Use stack memory for small registers */
+        return local_buf;
+    } else {
+        void *buf = malloc(reg_sz);
+        if (buf) {
+            *malloc_used = 1;
+        }
+        return buf;
+    }
+}
+
+static void free_register_buffer(void *buf, int malloc_used)
+{
+    if (malloc_used) {
+        free(buf);
+    }
+}
+
 static void process_reg_read(gdbstub_t *gdbstub, void *args)
 {
     char packet_str[MAX_SEND_PACKET_SIZE];
+    size_t local_buf;  // Stack variable for small registers
     void *reg_value = NULL;
+    int malloc_used = 0;
 
     for (int i = 0; i < gdbstub->arch.reg_num; i++) {
         size_t reg_sz = gdbstub->ops->get_reg_rize(i);
-        assert((reg_value = malloc(reg_sz)) != NULL);
+
+        // Free previous allocation if it exists
+        free_register_buffer(reg_value, malloc_used);
+        malloc_used = 0;
+
+        assert((reg_value = get_register_buffer(reg_sz, &local_buf,
+                                                &malloc_used)) != NULL);
+
         int ret = gdbstub->ops->read_reg(args, i, reg_value);
         if (!ret) {
             hex_to_str((uint8_t *) reg_value, &packet_str[i * reg_sz * 2],
                        reg_sz);
         } else {
             sprintf(packet_str, "E%d", ret);
-            free(reg_value);
             break;
         }
     }
+    free_register_buffer(reg_value, malloc_used);
+
     conn_send_pktstr(&gdbstub->priv->conn, packet_str);
-    free(reg_value);
 }
 
 static void process_reg_read_one(gdbstub_t *gdbstub, char *payload, void *args)
 {
     char packet_str[MAX_SEND_PACKET_SIZE];
     int regno;
-    void *reg_value;
+    size_t local_buf;  // Stack variable for small registers
+    void *reg_value = NULL;
+    int malloc_used = 0;
 
     assert(sscanf(payload, "%x", &regno) == 1);
     size_t reg_sz = gdbstub->ops->get_reg_rize(regno);
-    assert((reg_value = malloc(reg_sz)) != NULL);
+
+    assert((reg_value =
+                get_register_buffer(reg_sz, &local_buf, &malloc_used)) != NULL);
+
     int ret = gdbstub->ops->read_reg(args, regno, reg_value);
 #ifdef DEBUG
-    printf("reg read = regno %d data %lx\n", regno, reg_value);
+    printf("reg read = regno %d data %lx\n", regno, *(size_t *) reg_value);
 #endif
     if (!ret) {
         hex_to_str((uint8_t *) reg_value, packet_str, reg_sz);
     } else {
         sprintf(packet_str, "E%d", ret);
     }
+
+    free_register_buffer(reg_value, malloc_used);
     conn_send_pktstr(&gdbstub->priv->conn, packet_str);
-    free(reg_value);
 }
 
 static void process_reg_write(gdbstub_t *gdbstub, char *payload, void *args)
 {
+    size_t local_buf;  // Stack variable for small registers
     void *reg_value = NULL;
+    int malloc_used = 0;
 
     for (int i = 0; i < gdbstub->arch.reg_num; i++) {
+        // Free previous allocation if it exists
+        free_register_buffer(reg_value, malloc_used);
+        malloc_used = 0;
+
         size_t reg_sz = gdbstub->ops->get_reg_rize(i);
-        assert((reg_value = malloc(reg_sz)) != NULL);
+        assert((reg_value = get_register_buffer(reg_sz, &local_buf,
+                                                &malloc_used)) != NULL);
+
         str_to_hex(&payload[i * reg_sz * 2], (uint8_t *) reg_value, reg_sz);
 #ifdef DEBUG
-        printf("reg write = regno %d data %lx\n", i, reg_value);
+        printf("reg write = regno %d data %lx\n", i, *(size_t *) reg_value);
 #endif
         int ret = gdbstub->ops->write_reg(args, i, reg_value);
         if (ret) {
@@ -158,19 +205,22 @@ static void process_reg_write(gdbstub_t *gdbstub, char *payload, void *args)
              * an expected behavior. */
             char packet_str[MAX_SEND_PACKET_SIZE];
             sprintf(packet_str, "E%d", ret);
+            free_register_buffer(reg_value, malloc_used);
             conn_send_pktstr(&gdbstub->priv->conn, packet_str);
-            free(reg_value);
             return;
         }
     }
+
+    free_register_buffer(reg_value, malloc_used);
     conn_send_pktstr(&gdbstub->priv->conn, "OK");
-    free(reg_value);
 }
 
 static void process_reg_write_one(gdbstub_t *gdbstub, char *payload, void *args)
 {
     int regno;
-    void *data;
+    size_t local_buf;  // Stack variable for small registers
+    void *data = NULL;
+    int malloc_used = 0;
     char *regno_str = payload;
     char *data_str = strchr(payload, '=');
     if (data_str) {
@@ -180,14 +230,19 @@ static void process_reg_write_one(gdbstub_t *gdbstub, char *payload, void *args)
 
     assert(sscanf(regno_str, "%x", &regno) == 1);
     size_t reg_sz = gdbstub->ops->get_reg_rize(regno);
-    assert((data = malloc(reg_sz)) != NULL);
+
+    assert((data = get_register_buffer(reg_sz, &local_buf, &malloc_used)) !=
+           NULL);
     assert(strlen(data_str) == reg_sz * 2);
 
     str_to_hex(data_str, (uint8_t *) data, reg_sz);
 #ifdef DEBUG
-    printf("reg write = regno %d / data %lx\n", regno, data);
+    printf("reg write = regno %d / data %lx\n", regno, *(size_t *) data);
 #endif
     int ret = gdbstub->ops->write_reg(args, regno, data);
+
+    free_register_buffer(data, malloc_used);
+
     if (!ret) {
         conn_send_pktstr(&gdbstub->priv->conn, "OK");
     } else {
@@ -195,7 +250,6 @@ static void process_reg_write_one(gdbstub_t *gdbstub, char *payload, void *args)
         sprintf(packet_str, "E%d", ret);
         conn_send_pktstr(&gdbstub->priv->conn, packet_str);
     }
-    free(data);
 }
 
 static void process_mem_read(gdbstub_t *gdbstub, char *payload, void *args)
