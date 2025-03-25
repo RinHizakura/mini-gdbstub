@@ -138,6 +138,12 @@ static void process_reg_read(gdbstub_t *gdbstub, void *args)
                                                 &malloc_used)) != NULL);
 
         int ret = gdbstub->ops->read_reg(args, i, reg_value);
+#ifdef DEBUG
+        char debug_hex[MAX_SEND_PACKET_SIZE];
+        hex_to_str((uint8_t *) reg_value, debug_hex, reg_sz);
+        printf("reg read = regno %d data 0x%s (size %zu)\n", i, debug_hex,
+               reg_sz);
+#endif
         if (!ret) {
             hex_to_str((uint8_t *) reg_value, &packet_str[i * reg_sz * 2],
                        reg_sz);
@@ -167,7 +173,10 @@ static void process_reg_read_one(gdbstub_t *gdbstub, char *payload, void *args)
 
     int ret = gdbstub->ops->read_reg(args, regno, reg_value);
 #ifdef DEBUG
-    printf("reg read = regno %d data %lx\n", regno, *(size_t *) reg_value);
+    char debug_hex[MAX_SEND_PACKET_SIZE];
+    hex_to_str((uint8_t *) reg_value, debug_hex, reg_sz);
+    printf("reg read = regno %d data 0x%s (size %zu)\n", regno, debug_hex,
+           reg_sz);
 #endif
     if (!ret) {
         hex_to_str((uint8_t *) reg_value, packet_str, reg_sz);
@@ -196,7 +205,10 @@ static void process_reg_write(gdbstub_t *gdbstub, char *payload, void *args)
 
         str_to_hex(&payload[i * reg_sz * 2], (uint8_t *) reg_value, reg_sz);
 #ifdef DEBUG
-        printf("reg write = regno %d data %lx\n", i, *(size_t *) reg_value);
+        char debug_hex[MAX_SEND_PACKET_SIZE];
+        hex_to_str((uint8_t *) reg_value, debug_hex, reg_sz);
+        printf("reg write = regno %d data 0x%s (size %zu)\n", i, debug_hex,
+               reg_sz);
 #endif
         int ret = gdbstub->ops->write_reg(args, i, reg_value);
         if (ret) {
@@ -237,8 +249,10 @@ static void process_reg_write_one(gdbstub_t *gdbstub, char *payload, void *args)
 
     str_to_hex(data_str, (uint8_t *) data, reg_sz);
 #ifdef DEBUG
-    printf("reg write = regno %d / data %lx\n", regno, *(size_t *) data);
+    printf("reg write = regno %d data 0x%s (size %zu)\n", regno, data_str,
+           reg_sz);
 #endif
+
     int ret = gdbstub->ops->write_reg(args, regno, data);
 
     free_register_buffer(data, malloc_used);
