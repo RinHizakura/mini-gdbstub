@@ -14,7 +14,7 @@ make
 To use the library in your project, you should include the file `gdbstub.h` first.
 Then, you have to initialize the pre-allocated structure `gdbstub_t` with `gdbstub_init`.
 
-```cpp
+```c
 bool gdbstub_init(gdbstub_t *gdbstub, struct target_ops *ops, arch_info_t arch, char *s);
 ```
 
@@ -29,6 +29,7 @@ Method         | Description
 ---------------|------------------
 `cont`         | Run the emulator until hitting breakpoint or exit.
 `stepi`        | Do one step on the emulator. You may define your own step for the emulator. For example, the common design is executing one instruction.
+`get_reg_rize` | Get the register size in bytes for the register specified by `regno` as a return value.
 `read_reg`     | Read the value of the register specified by `regno` to `*value`. Return zero if the operation success, otherwise return an errno for the corresponding error.
 `write_reg`    | Write value `value` to the register specified by `regno`. Return zero if the operation success, otherwise return an errno for the corresponding error.
 `read_mem`     | Read the memory according to the address specified by `addr` with size `len` to the buffer `*val`. Return zero if the operation success, otherwise return an errno for the corresponding error.
@@ -36,15 +37,16 @@ Method         | Description
 `set_bp`       | Set type `type` breakpoint on the address specified by `addr`. Return true if we set the breakpoint successfully, otherwise return false.
 `del_bp`       | Delete type `type` breakpoint on the address specified by `addr`. Return true if we delete the breakpoint successfully, otherwise return false.
 `on_interrupt` | Do something when receiving interrupt from GDB client. This method will run concurrently with `cont`, so you should be careful if there're shared data between them. You will need a lock or something similar to avoid data race.
-`set_cpu`      | Set the debug target CPU to `cpuid`
-`get_cpu`      | Get the current debug target CPU `cpuid` as return value
+`set_cpu`      | Set the debug target CPU to `cpuid`.
+`get_cpu`      | Get the current debug target CPU `cpuid` as return value.
 
-```cpp
+```c
 struct target_ops {
     gdb_action_t (*cont)(void *args);
     gdb_action_t (*stepi)(void *args);
-    int (*read_reg)(void *args, int regno, size_t *value);
-    int (*write_reg)(void *args, int regno, size_t value);
+    size_t (*get_reg_rize)(int regno);
+    int (*read_reg)(void *args, int regno, void *value);
+    int (*write_reg)(void *args, int regno, void* value);
     int (*read_mem)(void *args, size_t addr, size_t len, void *val);
     int (*write_mem)(void *args, size_t addr, size_t len, void *val);
     bool (*set_bp)(void *args, size_t addr, bp_type_t type);
@@ -61,7 +63,7 @@ should be `gdb_action_t`. After performing the relevant operation, you should re
 to continue debugging; otherwise, return `ACT_SHUTDOWN` to finish debugging. The library
 typically uses `ACT_NONE` to take no action.
 
-```cpp
+```c
 typedef enum {
     ACT_NONE,
     ACT_RESUME,
@@ -72,7 +74,7 @@ typedef enum {
 For `set_bp` and `del_bp`, the type of breakpoint which should be set or deleted is described
 in the type `bp_type_t`. In fact, its value will always be `BP_SOFTWARE` currently.
 
-```cpp
+```c
 typedef enum {
     BP_SOFTWARE = 0,
 } bp_type_t;
@@ -81,37 +83,35 @@ typedef enum {
 Another structure you have to declare is `arch_info_t`. You must explicitly specify about the
 following field within `arch_info_t` while integrating into your emulator:
 * `smp`: Number of target's CPU
-* `reg_byte`: Register's size in bytes
 * `reg_num`: Number of target's registers
 
 The `target_desc` is an optional member which could be
-`TARGET_RV32` or `TARGET_RV64` if the emulator is RISC-V 32-bit or 64-bit instruction
-set architecture. Alternatively, it can be a custom target description document
+`TARGET_RV32`,  `TARGET_RV64` if the emulator is RISC-V 32-bit or 64-bit instruction
+set architecture or `TARGET_X86_64` if the emulator is x86_64 instruction set architecture. Alternatively, it can be a custom target description document
 string used by gdb. If none of these apply, simply set it to NULL.
 
-* Although the value of `reg_num` and `reg_byte` may be determined by `target_desc`, those
+* Although the value of `reg_num` may be determined by `target_desc`, those
 members are still required to be filled correctly.
 
-```cpp
+```c
 typedef struct {
     char *target_desc;
     int smp;
     int reg_num;
-    size_t reg_byte;
 } arch_info_t;
 ```
 
 After startup, we can use `gdbstub_run` to run the emulator as gdbstub. The `args`
 can be used to pass the argument to any function in `struct target_ops`.
 
-```cpp
+```c
 bool gdbstub_run(gdbstub_t *gdbstub, void *args);
 ```
 
 When exiting from `gdbstub_run`, `gdbstub_close` should be called to recycle the resource on
 the initialization.
 
-```cpp
+```c
 void gdbstub_close(gdbstub_t *gdbstub);
 ```
 

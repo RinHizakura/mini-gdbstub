@@ -5,7 +5,7 @@
 #include <stdbool.h>
 #include "packet.h"
 
-#define MAX_SEND_PACKET_SIZE (0x400)
+#define MAX_SEND_PACKET_SIZE (0x1000)
 #define MAX_DATA_PAYLOAD (MAX_SEND_PACKET_SIZE - (2 + CSUM_SIZE + 2))
 
 typedef struct {
