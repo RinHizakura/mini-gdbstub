@@ -108,7 +108,7 @@ static void process_reg_read(gdbstub_t *gdbstub, void *args)
     char packet_str[MAX_SEND_PACKET_SIZE];
 
     for (int i = 0; i < gdbstub->arch.reg_num; i++) {
-        size_t reg_sz = gdbstub->ops->get_reg_rize(i);
+        size_t reg_sz = gdbstub->ops->get_reg_bytes(i);
         void *reg_value = regbuf_get(&gdbstub->priv->regbuf, reg_sz);
 
         int ret = gdbstub->ops->read_reg(args, i, reg_value);
@@ -136,7 +136,7 @@ static void process_reg_read_one(gdbstub_t *gdbstub, char *payload, void *args)
     int regno;
 
     assert(sscanf(payload, "%x", &regno) == 1);
-    size_t reg_sz = gdbstub->ops->get_reg_rize(regno);
+    size_t reg_sz = gdbstub->ops->get_reg_bytes(regno);
     void *reg_value = regbuf_get(&gdbstub->priv->regbuf, reg_sz);
 
     int ret = gdbstub->ops->read_reg(args, regno, reg_value);
@@ -157,7 +157,7 @@ static void process_reg_read_one(gdbstub_t *gdbstub, char *payload, void *args)
 static void process_reg_write(gdbstub_t *gdbstub, char *payload, void *args)
 {
     for (int i = 0; i < gdbstub->arch.reg_num; i++) {
-        size_t reg_sz = gdbstub->ops->get_reg_rize(i);
+        size_t reg_sz = gdbstub->ops->get_reg_bytes(i);
         void *reg_value = regbuf_get(&gdbstub->priv->regbuf, reg_sz);
 
         str_to_hex(&payload[i * reg_sz * 2], (uint8_t *) reg_value, reg_sz);
@@ -193,7 +193,7 @@ static void process_reg_write_one(gdbstub_t *gdbstub, char *payload, void *args)
     }
 
     assert(sscanf(regno_str, "%x", &regno) == 1);
-    size_t reg_sz = gdbstub->ops->get_reg_rize(regno);
+    size_t reg_sz = gdbstub->ops->get_reg_bytes(regno);
     void *data = regbuf_get(&gdbstub->priv->regbuf, reg_sz);
 
     assert(strlen(data_str) == reg_sz * 2);

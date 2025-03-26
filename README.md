@@ -29,7 +29,7 @@ Method         | Description
 ---------------|------------------
 `cont`         | Run the emulator until hitting breakpoint or exit.
 `stepi`        | Do one step on the emulator. You may define your own step for the emulator. For example, the common design is executing one instruction.
-`get_reg_rize` | Get the register size in bytes for the register specified by `regno` as a return value.
+`get_reg_bytes` | Get the register size in bytes for the register specified by `regno` as a return value.
 `read_reg`     | Read the value of the register specified by `regno` to `*value`. Return zero if the operation success, otherwise return an errno for the corresponding error.
 `write_reg`    | Write value `value` to the register specified by `regno`. Return zero if the operation success, otherwise return an errno for the corresponding error.
 `read_mem`     | Read the memory according to the address specified by `addr` with size `len` to the buffer `*val`. Return zero if the operation success, otherwise return an errno for the corresponding error.
@@ -44,7 +44,7 @@ Method         | Description
 struct target_ops {
     gdb_action_t (*cont)(void *args);
     gdb_action_t (*stepi)(void *args);
-    size_t (*get_reg_rize)(int regno);
+    size_t (*get_reg_bytes)(int regno);
     int (*read_reg)(void *args, int regno, void *value);
     int (*write_reg)(void *args, int regno, void* value);
     int (*read_mem)(void *args, size_t addr, size_t len, void *val);

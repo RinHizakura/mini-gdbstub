@@ -112,7 +112,7 @@ static void free_mem(struct mem *m)
     free(m->mem);
 }
 
-static size_t emu_get_reg_rize(int regno __attribute__((unused)))
+static size_t emu_get_reg_bytes(int regno __attribute__((unused)))
 {
     return 4;
 }
@@ -230,7 +230,7 @@ static void emu_on_interrupt(void *args)
 }
 
 struct target_ops emu_ops = {
-    .get_reg_rize = emu_get_reg_rize,
+    .get_reg_bytes = emu_get_reg_bytes,
     .read_reg = emu_read_reg,
     .write_reg = emu_write_reg,
     .read_mem = emu_read_mem,

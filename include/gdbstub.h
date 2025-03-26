@@ -32,7 +32,7 @@ typedef enum {
 struct target_ops {
     gdb_action_t (*cont)(void *args);
     gdb_action_t (*stepi)(void *args);
-    size_t (*get_reg_rize)(int regno);
+    size_t (*get_reg_bytes)(int regno);
     int (*read_reg)(void *args, int regno, void *value);
     int (*write_reg)(void *args, int regno, void *value);
     int (*read_mem)(void *args, size_t addr, size_t len, void *val);
