@@ -1,4 +1,5 @@
 #include <errno.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -111,7 +112,12 @@ static void free_mem(struct mem *m)
     free(m->mem);
 }
 
-static int emu_read_reg(void *args, int regno, size_t *reg_value)
+static size_t emu_get_reg_bytes(int regno __attribute__((unused)))
+{
+    return 4;
+}
+
+static int emu_read_reg(void *args, int regno, void *reg_value)
 {
     struct emu *emu = (struct emu *) args;
     if (regno > 32) {
@@ -119,14 +125,14 @@ static int emu_read_reg(void *args, int regno, size_t *reg_value)
     }
 
     if (regno == 32) {
-        *reg_value = emu->pc;
+        memcpy(reg_value, &emu->pc, 4);
     } else {
-        *reg_value = emu->x[regno];
+        memcpy(reg_value, &emu->x[regno], 4);
     }
     return 0;
 }
 
-static int emu_write_reg(void *args, int regno, size_t data)
+static int emu_write_reg(void *args, int regno, void *data)
 {
     struct emu *emu = (struct emu *) args;
 
@@ -135,9 +141,9 @@ static int emu_write_reg(void *args, int regno, size_t data)
     }
 
     if (regno == 32) {
-        emu->pc = data;
+        memcpy(&emu->pc, data, 4);
     } else {
-        emu->x[regno] = data;
+        memcpy(&emu->x[regno], data, 4);
     }
     return 0;
 }
@@ -224,6 +230,7 @@ static void emu_on_interrupt(void *args)
 }
 
 struct target_ops emu_ops = {
+    .get_reg_bytes = emu_get_reg_bytes,
     .read_reg = emu_read_reg,
     .write_reg = emu_write_reg,
     .read_mem = emu_read_mem,
@@ -249,10 +256,9 @@ int main(int argc, char *argv[])
     }
 
     if (!gdbstub_init(&emu.gdbstub, &emu_ops,
-                      (arch_info_t){
+                      (arch_info_t) {
                           .smp = 1,
                           .reg_num = 33,
-                          .reg_byte = 4,
                           .target_desc = TARGET_RV32,
                       },
                       "127.0.0.1:1234")) {

@@ -4,12 +4,14 @@
 #include <stdlib.h>
 #include <string.h>
 #include "conn.h"
+#include "regbuf.h"
 #include "gdb_signal.h"
 #include "utils/csum.h"
 #include "utils/translate.h"
 
 struct gdbstub_private {
     conn_t conn;
+    regbuf_t regbuf;
 
     pthread_t tid;
     bool async_io_enable;
@@ -71,6 +73,8 @@ bool gdbstub_init(gdbstub_t *gdbstub,
                   arch_info_t arch,
                   char *s)
 {
+    char *addr_str = NULL;
+
     if (s == NULL || ops == NULL)
         return false;
 
@@ -78,39 +82,41 @@ bool gdbstub_init(gdbstub_t *gdbstub,
     gdbstub->ops = ops;
     gdbstub->arch = arch;
     gdbstub->priv = calloc(1, sizeof(struct gdbstub_private));
-    if (gdbstub->priv == NULL) {
+    if (gdbstub->priv == NULL)
         return false;
-    }
 
     pthread_mutex_init(&gdbstub->priv->mutex, NULL);
     pthread_cond_init(&gdbstub->priv->cond, NULL);
 
     // This is a naive implementation to parse the string
-    char *addr_str = strdup(s);
+    addr_str = strdup(s);
     char *port_str = strchr(addr_str, ':');
     int port = 0;
-    if (addr_str == NULL) {
-        free(addr_str);
-        return false;
-    }
+    if (addr_str == NULL)
+        goto addr_fail;
 
     if (port_str != NULL) {
         *port_str = '\0';
         port_str += 1;
 
-        if (sscanf(port_str, "%d", &port) <= 0) {
-            free(addr_str);
-            return false;
-        }
+        if (sscanf(port_str, "%d", &port) <= 0)
+            goto addr_fail;
     }
 
-    if (!conn_init(&gdbstub->priv->conn, addr_str, port)) {
-        free(addr_str);
-        return false;
-    }
+    if (!regbuf_init(&gdbstub->priv->regbuf))
+        goto addr_fail;
+
+    if (!conn_init(&gdbstub->priv->conn, addr_str, port))
+        goto conn_fail;
+
     free(addr_str);
-
     return true;
+
+conn_fail:
+    regbuf_destroy(&gdbstub->priv->regbuf);
+addr_fail:
+    free(addr_str);
+    return false;
 }
 
 #define SEND_ERR(gdbstub, err) conn_send_pktstr(&gdbstub->priv->conn, err)
@@ -120,21 +126,27 @@ bool gdbstub_init(gdbstub_t *gdbstub,
 static void process_reg_read(gdbstub_t *gdbstub, void *args)
 {
     char packet_str[MAX_SEND_PACKET_SIZE];
-    size_t reg_value;
-    size_t reg_sz = gdbstub->arch.reg_byte;
-
-    assert(sizeof(reg_value) >= gdbstub->arch.reg_byte);
 
     for (int i = 0; i < gdbstub->arch.reg_num; i++) {
-        int ret = gdbstub->ops->read_reg(args, i, &reg_value);
+        size_t reg_sz = gdbstub->ops->get_reg_bytes(i);
+        void *reg_value = regbuf_get(&gdbstub->priv->regbuf, reg_sz);
+
+        int ret = gdbstub->ops->read_reg(args, i, reg_value);
+#ifdef DEBUG
+        char debug_hex[MAX_SEND_PACKET_SIZE];
+        hex_to_str((uint8_t *) reg_value, debug_hex, reg_sz);
+        printf("reg read = regno %d data 0x%s (size %zu)\n", i, debug_hex,
+               reg_sz);
+#endif
         if (!ret) {
-            hex_to_str((uint8_t *) &reg_value, &packet_str[i * reg_sz * 2],
+            hex_to_str((uint8_t *) reg_value, &packet_str[i * reg_sz * 2],
                        reg_sz);
         } else {
             sprintf(packet_str, "E%d", ret);
             break;
         }
     }
+
     conn_send_pktstr(&gdbstub->priv->conn, packet_str);
 }
 
@@ -142,16 +154,20 @@ static void process_reg_read_one(gdbstub_t *gdbstub, char *payload, void *args)
 {
     char packet_str[MAX_SEND_PACKET_SIZE];
     int regno;
-    size_t reg_sz = gdbstub->arch.reg_byte;
-    size_t reg_value;
 
     assert(sscanf(payload, "%x", &regno) == 1);
-    int ret = gdbstub->ops->read_reg(args, regno, &reg_value);
+    size_t reg_sz = gdbstub->ops->get_reg_bytes(regno);
+    void *reg_value = regbuf_get(&gdbstub->priv->regbuf, reg_sz);
+
+    int ret = gdbstub->ops->read_reg(args, regno, reg_value);
 #ifdef DEBUG
-    printf("reg read = regno %d data %lx\n", regno, reg_value);
+    char debug_hex[MAX_SEND_PACKET_SIZE];
+    hex_to_str((uint8_t *) reg_value, debug_hex, reg_sz);
+    printf("reg read = regno %d data 0x%s (size %zu)\n", regno, debug_hex,
+           reg_sz);
 #endif
     if (!ret) {
-        hex_to_str((uint8_t *) &reg_value, packet_str, reg_sz);
+        hex_to_str((uint8_t *) reg_value, packet_str, reg_sz);
     } else {
         sprintf(packet_str, "E%d", ret);
     }
@@ -160,15 +176,16 @@ static void process_reg_read_one(gdbstub_t *gdbstub, char *payload, void *args)
 
 static void process_reg_write(gdbstub_t *gdbstub, char *payload, void *args)
 {
-    size_t reg_value = 0;
-    size_t reg_sz = gdbstub->arch.reg_byte;
-
-    assert(sizeof(reg_value) >= gdbstub->arch.reg_byte);
-
     for (int i = 0; i < gdbstub->arch.reg_num; i++) {
-        str_to_hex(&payload[i * reg_sz * 2], (uint8_t *) &reg_value, reg_sz);
+        size_t reg_sz = gdbstub->ops->get_reg_bytes(i);
+        void *reg_value = regbuf_get(&gdbstub->priv->regbuf, reg_sz);
+
+        str_to_hex(&payload[i * reg_sz * 2], (uint8_t *) reg_value, reg_sz);
 #ifdef DEBUG
-        printf("reg write = regno %d data %lx\n", i, reg_value);
+        char debug_hex[MAX_SEND_PACKET_SIZE];
+        hex_to_str((uint8_t *) reg_value, debug_hex, reg_sz);
+        printf("reg write = regno %d data 0x%s (size %zu)\n", i, debug_hex,
+               reg_sz);
 #endif
         int ret = gdbstub->ops->write_reg(args, i, reg_value);
         if (ret) {
@@ -181,13 +198,13 @@ static void process_reg_write(gdbstub_t *gdbstub, char *payload, void *args)
             return;
         }
     }
+
     conn_send_pktstr(&gdbstub->priv->conn, "OK");
 }
 
 static void process_reg_write_one(gdbstub_t *gdbstub, char *payload, void *args)
 {
     int regno;
-    size_t data;
     char *regno_str = payload;
     char *data_str = strchr(payload, '=');
     if (data_str) {
@@ -195,14 +212,20 @@ static void process_reg_write_one(gdbstub_t *gdbstub, char *payload, void *args)
         data_str++;
     }
 
-    assert(strlen(data_str) == gdbstub->arch.reg_byte * 2);
-    assert(sizeof(data) >= gdbstub->arch.reg_byte);
     assert(sscanf(regno_str, "%x", &regno) == 1);
-    str_to_hex(data_str, (uint8_t *) &data, gdbstub->arch.reg_byte);
+    size_t reg_sz = gdbstub->ops->get_reg_bytes(regno);
+    void *data = regbuf_get(&gdbstub->priv->regbuf, reg_sz);
+
+    assert(strlen(data_str) == reg_sz * 2);
+
+    str_to_hex(data_str, (uint8_t *) data, reg_sz);
 #ifdef DEBUG
-    printf("reg write = regno %d / data %lx\n", regno, data);
+    printf("reg write = regno %d data 0x%s (size %zu)\n", regno, data_str,
+           reg_sz);
 #endif
+
     int ret = gdbstub->ops->write_reg(args, regno, data);
+
     if (!ret) {
         conn_send_pktstr(&gdbstub->priv->conn, "OK");
     } else {
@@ -690,17 +713,8 @@ void gdbstub_close(gdbstub_t *gdbstub)
     /* Use thread ID to make sure the thread was created */
     if (gdbstub->priv->tid != 0) {
         __atomic_store_n(&thread_stop, true, __ATOMIC_RELAXED);
-
-        // Signal the condition to wake up the thread if it's waiting
-        pthread_mutex_lock(&gdbstub->priv->mutex);
-        pthread_cond_signal(&gdbstub->priv->cond);
-        pthread_mutex_unlock(&gdbstub->priv->mutex);
-
         pthread_join(gdbstub->priv->tid, NULL);
     }
-
-    pthread_mutex_destroy(&gdbstub->priv->mutex);
-    pthread_cond_destroy(&gdbstub->priv->cond);
 
     conn_close(&gdbstub->priv->conn);
     free(gdbstub->priv);
