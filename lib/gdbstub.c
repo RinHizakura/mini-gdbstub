@@ -15,17 +15,17 @@ struct gdbstub_private {
 
     pthread_t tid;
     bool async_io_enable;
-    pthread_mutex_t mutex;
-    pthread_cond_t cond;
+    pthread_mutex_t reader_mutex;
+    pthread_cond_t reader_cond;
     void *args;
 };
 
 static inline void async_io_enable(struct gdbstub_private *priv)
 {
     __atomic_store_n(&priv->async_io_enable, true, __ATOMIC_RELAXED);
-    pthread_mutex_lock(&priv->mutex);
-    pthread_cond_signal(&priv->cond);
-    pthread_mutex_unlock(&priv->mutex);
+    pthread_mutex_lock(&priv->reader_mutex);
+    pthread_cond_signal(&priv->reader_cond);
+    pthread_mutex_unlock(&priv->reader_mutex);
 }
 
 static inline void async_io_disable(struct gdbstub_private *priv)
@@ -51,9 +51,9 @@ static void *socket_reader(gdbstub_t *gdbstub)
         /* Wait until async I/O is enabled or thread is stopped */
         while (!async_io_is_enable(priv) &&
                !__atomic_load_n(&thread_stop, __ATOMIC_RELAXED)) {
-            pthread_mutex_lock(&priv->mutex);
-            pthread_cond_wait(&priv->cond, &priv->mutex);
-            pthread_mutex_unlock(&priv->mutex);
+            pthread_mutex_lock(&priv->reader_mutex);
+            pthread_cond_wait(&priv->reader_cond, &priv->reader_mutex);
+            pthread_mutex_unlock(&priv->reader_mutex);
         }
 
         if (__atomic_load_n(&thread_stop, __ATOMIC_RELAXED)) {
@@ -85,8 +85,8 @@ bool gdbstub_init(gdbstub_t *gdbstub,
     if (gdbstub->priv == NULL)
         return false;
 
-    pthread_mutex_init(&gdbstub->priv->mutex, NULL);
-    pthread_cond_init(&gdbstub->priv->cond, NULL);
+    pthread_mutex_init(&gdbstub->priv->reader_mutex, NULL);
+    pthread_cond_init(&gdbstub->priv->reader_cond, NULL);
 
     // This is a naive implementation to parse the string
     addr_str = strdup(s);
