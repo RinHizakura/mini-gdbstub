@@ -39,6 +39,20 @@ static inline bool async_io_is_enable(struct gdbstub_private *priv)
 }
 
 static volatile bool thread_stop = false;
+
+static inline void reader_thread_stop(struct gdbstub_private *priv)
+{
+    __atomic_store_n(&thread_stop, true, __ATOMIC_RELAXED);
+    pthread_mutex_lock(&priv->reader_mutex);
+    pthread_cond_signal(&priv->reader_cond);
+    pthread_mutex_unlock(&priv->reader_mutex);
+}
+
+static inline bool reader_thread_is_stop()
+{
+    return __atomic_load_n(&thread_stop, __ATOMIC_RELAXED);
+}
+
 static void *socket_reader(gdbstub_t *gdbstub)
 {
     void *args = gdbstub->priv->args;
@@ -47,22 +61,15 @@ static void *socket_reader(gdbstub_t *gdbstub)
     /* This thread will only works when running the gdbstub routine,
      * which won't procees on any packets. In this case, we read packet
      * in another thread to be able to interrupt the gdbstub. */
-    while (!__atomic_load_n(&thread_stop, __ATOMIC_RELAXED)) {
+    while (reader_thread_is_stop()) {
         /* Wait until async I/O is enabled or thread is stopped */
-        while (!async_io_is_enable(priv) &&
-               !__atomic_load_n(&thread_stop, __ATOMIC_RELAXED)) {
-            pthread_mutex_lock(&priv->reader_mutex);
+        pthread_mutex_lock(&priv->reader_mutex);
+        while (!async_io_is_enable(priv) && !reader_thread_is_stop())
             pthread_cond_wait(&priv->reader_cond, &priv->reader_mutex);
-            pthread_mutex_unlock(&priv->reader_mutex);
-        }
+        pthread_mutex_unlock(&priv->reader_mutex);
 
-        if (__atomic_load_n(&thread_stop, __ATOMIC_RELAXED)) {
-            break;
-        }
-
-        if (conn_try_recv_intr(&priv->conn)) {
+        if (conn_try_recv_intr(&priv->conn))
             gdbstub->ops->on_interrupt(args);
-        }
     }
 
     return NULL;
@@ -712,7 +719,7 @@ void gdbstub_close(gdbstub_t *gdbstub)
 {
     /* Use thread ID to make sure the thread was created */
     if (gdbstub->priv->tid != 0) {
-        __atomic_store_n(&thread_stop, true, __ATOMIC_RELAXED);
+        reader_thread_stop(gdbstub->priv);
         pthread_join(gdbstub->priv->tid, NULL);
     }
 
