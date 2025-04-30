@@ -33,7 +33,7 @@ static bool socket_writable(int socket_fd, int timeout)
 
 bool conn_init(conn_t *conn, char *addr_str, int port)
 {
-    if(!pktbuf_init(&conn->pktbuf))
+    if (!pktbuf_init(&conn->pktbuf))
         return false;
 
     struct in_addr addr_ip;
@@ -48,12 +48,13 @@ bool conn_init(conn_t *conn, char *addr_str, int port)
 
         int optval = 1;
         if (setsockopt(conn->listen_fd, SOL_SOCKET, SO_REUSEADDR, &optval,
-                    sizeof(optval)) < 0) {
+                       sizeof(optval)) < 0) {
             warn("Set sockopt fail.\n");
             goto fail;
         }
 
-        if (bind(conn->listen_fd, (struct sockaddr *) &addr, sizeof(addr)) < 0) {
+        if (bind(conn->listen_fd, (struct sockaddr *) &addr, sizeof(addr)) <
+            0) {
             warn("Bind fail.\n");
             goto fail;
         }
@@ -66,7 +67,8 @@ bool conn_init(conn_t *conn, char *addr_str, int port)
         if (conn->listen_fd < 0)
             return false;
 
-        if (bind(conn->listen_fd, (struct sockaddr *) &addr, sizeof(addr)) < 0) {
+        if (bind(conn->listen_fd, (struct sockaddr *) &addr, sizeof(addr)) <
+            0) {
             warn("Bind fail.\n");
             goto fail;
         }
