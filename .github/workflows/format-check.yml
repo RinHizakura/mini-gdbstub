@@ -1,0 +1,26 @@
+name: Format Check
+
+on:
+  push:         # Runs on push to any branch
+  pull_request: # Runs on PRs targeting any branch
+
+jobs:
+  format:
+    name: Check C/C++ Formatting
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install clang-format
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-format
+
+      - name: Check C/C++ code formatting
+        run: |
+          echo "Checking formatting..."
+          # Find C source and header files, then check formatting with clang-format
+          find . -name '*.c' -o -name '*.h' | xargs clang-format --dry-run -Werror
+          echo "Formatting check passed."

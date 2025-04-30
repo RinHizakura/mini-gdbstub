@@ -1,0 +1,26 @@
+name: Build Check
+
+on:
+  push:         # Runs on push to any branch
+  pull_request: # Runs on PRs targeting any branch
+
+jobs:
+  build:
+    name: Build Project
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential
+
+      - name: Build project using Makefile
+        run: |
+          echo "Building library"
+          make
+          echo "Building emu"
+          make build-emu
