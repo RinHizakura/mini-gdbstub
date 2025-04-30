@@ -13,7 +13,7 @@ LIBGDBSTUB = $(OUT)/libgdbstub.a
 SHELL_HACK := $(shell mkdir -p $(OUT))
 GIT_HOOKS := .git/hooks/applied
 
-LIBSRCS = $(shell find ./lib -name '*.c')
+LIBSRCS = $(shell find ./src -name '*.c')
 _LIB_OBJ =  $(notdir $(LIBSRCS))
 LIB_OBJ = $(_LIB_OBJ:%.c=$(OUT)/%.o)
 
