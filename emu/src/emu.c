@@ -15,11 +15,11 @@ struct mem {
 
 struct emu {
     struct mem m;
-    size_t x[32];
-    size_t pc;
+    uint64_t x[32];
+    uint64_t pc;
 
     bool bp_is_set;
-    size_t bp_addr;
+    uint64_t bp_addr;
 
     bool halt;
 
@@ -47,23 +47,43 @@ static void emu_exec(struct emu *emu, uint32_t inst)
 {
     uint8_t opcode = inst & 0x7f;
     uint8_t rd = (inst >> 7) & 0x1f;
-    uint8_t rs1 = ((inst >> 15) & 0x1f);
-    uint8_t rs2 = ((inst >> 20) & 0x1f);
+    uint8_t rs1 = (inst >> 15) & 0x1f;
+    uint8_t rs2 = (inst >> 20) & 0x1f;
+    uint8_t funct3 = (inst >> 12) & 0x7;
+    uint8_t funct7 = (inst >> 25) & 0x7f;
     uint64_t imm = asr_i64((int) (inst & 0xfff00000), 20);
 
     switch (opcode) {
-    // addi
     case 0x13:
-        emu->x[rd] = emu->x[rd] + imm;
+        switch (funct3) {
+        case 0x0:
+            // addi
+            emu->x[rd] = emu->x[rd] + imm;
+            return;
+        default:
+            break;
+        }
         break;
-    // add
     case 0x33:
-        emu->x[rd] = emu->x[rs1] + emu->x[rs2];
+        switch (funct3) {
+        case 0x0:
+            switch (funct7) {
+            case 0x00:
+                // add
+                emu->x[rd] = emu->x[rs1] + emu->x[rs2];
+                return;
+            default:
+                break;
+            }
+            break;
+        }
         break;
     default:
-        printf("Not implemented or invalid opcode 0x%x\n", opcode);
         break;
     }
+
+    printf("Not implemented or invalid instruction@%lx\n", emu->pc - 4);
+    printf("opcode%x, funct3%x, funct7%x\n", opcode, funct3, funct7);
 }
 
 static void emu_init(struct emu *emu)
@@ -114,7 +134,7 @@ static void free_mem(struct mem *m)
 
 static size_t emu_get_reg_bytes(int regno __attribute__((unused)))
 {
-    return 4;
+    return 8;
 }
 
 static int emu_read_reg(void *args, int regno, void *reg_value)

@@ -31,6 +31,8 @@ debug: CFLAGS += -O3 -g -DDEBUG
 debug: LDFLAGS += -O3
 debug: $(LIBGDBSTUB)
 
+test: $(TEST_BIN)
+
 $(GIT_HOOKS):
 	@scripts/install-git-hooks
 	@echo
@@ -42,10 +44,11 @@ $(LIBGDBSTUB): $(LIB_OBJ)
 	$(AR) -rcs $@ $^
 
 $(TEST_OBJ): tests/test.c
-	riscv32-unknown-elf-gcc -march=rv32g -Wl,-Ttext=0x0 -nostdlib -g -o $@ $<
+	riscv64-unknown-elf-gcc -march=rv64g -Wl,-Ttext=0x0 -nostdlib -g -o $@ $<
 
 $(TEST_BIN): $(TEST_OBJ)
-	riscv32-unknown-elf-objcopy -O binary $< $@
+	riscv64-unknown-elf-objcopy -O binary $< $@
+
 
 build-emu: $(LIBGDBSTUB)
 	$(MAKE) -C emu
@@ -55,7 +58,7 @@ run-gdbstub: $(TEST_BIN) build-emu
 
 GDBSTUB_COMM = 127.0.0.1:1234
 run-gdb: $(TEST_OBJ)
-	riscv32-unknown-elf-gdb                     \
+	riscv64-unknown-elf-gdb                     \
 		-ex "file $(TEST_OBJ)"              \
 		-ex "set debug remote 1"            \
 		-ex "target remote $(GDBSTUB_COMM)" \
