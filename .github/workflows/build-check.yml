@@ -20,6 +20,7 @@ jobs:
 
       - name: Build project using Makefile
         run: |
-          echo "Building project..."
+          echo "Building library"
           make
-          echo "Build successful."
+          echo "Building emu"
+          make build-emu
