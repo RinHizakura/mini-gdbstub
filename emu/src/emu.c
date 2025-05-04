@@ -41,8 +41,7 @@ static inline bool emu_is_halt(struct emu *emu)
     return __atomic_load_n(&emu->halt, __ATOMIC_RELAXED);
 }
 
-#define asr_i64(value, amount) \
-    (value < 0 ? ~(~value >> amount) : value >> amount)
+#define asr_i32(value, amount) ((int32_t) (value) >> (amount))
 static void emu_exec(struct emu *emu, uint32_t inst)
 {
     uint8_t opcode = inst & 0x7f;
@@ -51,14 +50,32 @@ static void emu_exec(struct emu *emu, uint32_t inst)
     uint8_t rs2 = (inst >> 20) & 0x1f;
     uint8_t funct3 = (inst >> 12) & 0x7;
     uint8_t funct7 = (inst >> 25) & 0x7f;
-    uint64_t imm = asr_i64((int) (inst & 0xfff00000), 20);
+
+    uint64_t imm;
+
+#ifdef DEBUG
+    printf("[%4lx] opcode: %2x, funct3: %x, funct7: %2x\n", emu->pc - 4, opcode,
+           funct3, funct7);
+#endif
 
     switch (opcode) {
     case 0x13:
         switch (funct3) {
         case 0x0:
             // addi
+            imm = asr_i32(inst & 0xfff00000, 20);
             emu->x[rd] = emu->x[rd] + imm;
+            return;
+        default:
+            break;
+        }
+        break;
+    case 0x23:
+        switch (funct3) {
+        case 0x3:
+            // sd
+            imm = asr_i32(inst & 0xfe000000, 20) | ((inst >> 7) & 0x1f);
+            memcpy((void *) emu->m.mem + emu->x[rs1] + imm, &emu->x[rs2], 8);
             return;
         default:
             break;
@@ -83,7 +100,7 @@ static void emu_exec(struct emu *emu, uint32_t inst)
     }
 
     printf("Not implemented or invalid instruction@%lx\n", emu->pc - 4);
-    printf("opcode%x, funct3%x, funct7%x\n", opcode, funct3, funct7);
+    printf("opcode:%x, funct3:%x, funct7:%x\n", opcode, funct3, funct7);
 }
 
 static void emu_init(struct emu *emu)
