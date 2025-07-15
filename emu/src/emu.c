@@ -51,6 +51,7 @@ static void emu_exec(struct emu *emu, uint32_t inst)
     uint8_t funct3 = (inst >> 12) & 0x7;
     uint8_t funct7 = (inst >> 25) & 0x7f;
 
+    uint32_t offset;
     uint64_t imm;
 
 #ifdef DEBUG
@@ -66,12 +67,22 @@ static void emu_exec(struct emu *emu, uint32_t inst)
             imm = asr_i32(inst & 0xfff00000, 20);
             emu->x[rd] = emu->x[rd] + imm;
             return;
+        case 0x2:
+            // slti
+            imm = asr_i32(inst & 0xfff00000, 20);
+            emu->x[rd] = (int64_t) emu->x[rs1] < (int64_t) imm ? 1 : 0;
+            return;
         default:
             break;
         }
         break;
     case 0x23:
         switch (funct3) {
+        case 0x2:
+            // sw
+            imm = asr_i32(inst & 0xfe000000, 20) | ((inst >> 7) & 0x1f);
+            memcpy((void *) emu->m.mem + emu->x[rs1] + imm, &emu->x[rs2], 4);
+            return;
         case 0x3:
             // sd
             imm = asr_i32(inst & 0xfe000000, 20) | ((inst >> 7) & 0x1f);
@@ -95,6 +106,13 @@ static void emu_exec(struct emu *emu, uint32_t inst)
             break;
         }
         break;
+    case 0x6f:
+        // jal
+        emu->x[rd] = emu->pc;
+        offset = ((int32_t) (inst & 0x80000000) >> 11) | (inst & 0xff000) |
+                 ((inst >> 9) & 0x800) | ((inst >> 20) & 0x7fe);
+        emu->pc = emu->pc + offset - 4;
+        return;
     default:
         break;
     }
