@@ -7,6 +7,19 @@
 
 #include "gdbstub.h"
 
+#define read_len(bit, ptr, value)                             \
+    do {                                                      \
+        value = 0;                                            \
+        for (int i = 0; i < ((bit) >> 3); i++)                \
+            value |= ((uint64_t) (*((ptr) + i))) << (i << 3); \
+    } while (0)
+
+#define write_len(bit, ptr, value)                     \
+    do {                                               \
+        for (int i = 0; i < ((bit) >> 3); i++)         \
+            *((ptr) + i) = (value >> (i << 3)) & 0xff; \
+    } while (0)
+
 #define MEM_SIZE (1024)
 struct mem {
     uint8_t *mem;
@@ -41,7 +54,6 @@ static inline bool emu_is_halt(struct emu *emu)
     return __atomic_load_n(&emu->halt, __ATOMIC_RELAXED);
 }
 
-#define asr_i32(value, amount) ((int32_t) (value) >> (amount))
 static void emu_exec(struct emu *emu, uint32_t inst)
 {
     uint8_t opcode = inst & 0x7f;
@@ -51,7 +63,7 @@ static void emu_exec(struct emu *emu, uint32_t inst)
     uint8_t funct3 = (inst >> 12) & 0x7;
     uint8_t funct7 = (inst >> 25) & 0x7f;
 
-    uint32_t offset;
+    uint8_t *ptr;
     uint64_t imm;
 
 #ifdef DEBUG
@@ -64,12 +76,12 @@ static void emu_exec(struct emu *emu, uint32_t inst)
         switch (funct3) {
         case 0x0:
             // addi
-            imm = asr_i32(inst & 0xfff00000, 20);
+            imm = (int32_t) (inst & 0xfff00000) >> 20;
             emu->x[rd] = emu->x[rd] + imm;
             return;
         case 0x2:
             // slti
-            imm = asr_i32(inst & 0xfff00000, 20);
+            imm = (int32_t) (inst & 0xfff00000) >> 20;
             emu->x[rd] = (int64_t) emu->x[rs1] < (int64_t) imm ? 1 : 0;
             return;
         default:
@@ -80,13 +92,17 @@ static void emu_exec(struct emu *emu, uint32_t inst)
         switch (funct3) {
         case 0x2:
             // sw
-            imm = asr_i32(inst & 0xfe000000, 20) | ((inst >> 7) & 0x1f);
-            memcpy((void *) emu->m.mem + emu->x[rs1] + imm, &emu->x[rs2], 4);
+            imm = (((int32_t) (inst & 0xfe000000) >> 20) |
+                   (int32_t) ((inst >> 7) & 0x1f));
+            ptr = emu->m.mem + emu->x[rs1] + imm;
+            write_len(32, ptr, emu->x[rs2]);
             return;
         case 0x3:
             // sd
-            imm = asr_i32(inst & 0xfe000000, 20) | ((inst >> 7) & 0x1f);
-            memcpy((void *) emu->m.mem + emu->x[rs1] + imm, &emu->x[rs2], 8);
+            imm = (((int32_t) (inst & 0xfe000000) >> 20) |
+                   (int32_t) ((inst >> 7) & 0x1f));
+            ptr = emu->m.mem + emu->x[rs1] + imm;
+            write_len(64, ptr, emu->x[rs2]);
             return;
         default:
             break;
@@ -109,9 +125,12 @@ static void emu_exec(struct emu *emu, uint32_t inst)
     case 0x6f:
         // jal
         emu->x[rd] = emu->pc;
-        offset = ((int32_t) (inst & 0x80000000) >> 11) | (inst & 0xff000) |
-                 ((inst >> 9) & 0x800) | ((inst >> 20) & 0x7fe);
-        emu->pc = emu->pc + offset - 4;
+        // imm[20|10:1|11|19:12] = inst[31|30:21|20|19:12]
+        imm = ((int32_t) (inst & 0x80000000) >> 11)  // 20
+              | (int32_t) ((inst & 0xff000))         // 19:12
+              | (int32_t) ((inst >> 9) & 0x800)      // 11
+              | (int32_t) ((inst >> 20) & 0x7fe);    // 10:1
+        emu->pc = emu->pc + imm - 4;
         return;
     default:
         break;
@@ -314,7 +333,7 @@ int main(int argc, char *argv[])
                       (arch_info_t){
                           .smp = 1,
                           .reg_num = 33,
-                          .target_desc = TARGET_RV32,
+                          .target_desc = TARGET_RV64,
                       },
                       "127.0.0.1:1234")) {
         fprintf(stderr, "Fail to create socket.\n");
