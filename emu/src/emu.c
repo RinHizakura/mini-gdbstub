@@ -64,7 +64,7 @@ static void emu_exec(struct emu *emu, uint32_t inst)
     uint8_t funct7 = (inst >> 25) & 0x7f;
 
     uint8_t *ptr;
-    uint64_t imm;
+    uint64_t imm, value;
 
 #ifdef DEBUG
     printf("[%4lx] opcode: %2x, funct3: %x, funct7: %2x\n", emu->pc - 4, opcode,
@@ -72,6 +72,19 @@ static void emu_exec(struct emu *emu, uint32_t inst)
 #endif
 
     switch (opcode) {
+    case 0x3:
+        switch (funct3) {
+        case 0x2:
+            // lw
+            imm = (int32_t) (inst & 0xfff00000) >> 20;
+            ptr = emu->m.mem + emu->x[rs1] + imm;
+            read_len(32, ptr, value);
+            emu->x[rd] = value;
+            return;
+        default:
+            break;
+        }
+        break;
     case 0x13:
         switch (funct3) {
         case 0x0:
@@ -119,6 +132,25 @@ static void emu_exec(struct emu *emu, uint32_t inst)
             default:
                 break;
             }
+            break;
+        default:
+            break;
+        }
+        break;
+    case 0x3b:
+        switch (funct3) {
+        case 0x0:
+            switch (funct7) {
+            case 0x00:
+                // addw
+                emu->x[rd] =
+                    (int32_t) ((uint32_t) emu->x[rs1] + (uint32_t) emu->x[rs2]);
+                return;
+            default:
+                break;
+            }
+            return;
+        default:
             break;
         }
         break;
