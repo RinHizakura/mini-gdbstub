@@ -3,11 +3,8 @@ CFLAGS = -Iinclude -Wall -Wextra -MMD #-Werror
 CURDIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 
 O ?= build
-ifeq ($(O), $(CURDIR)/build)
-    OUT := $(CURDIR)
-else
-    OUT := $(O)
-endif
+OUT := $(O)
+EMU_OUT := $(abspath $(OUT)/emu)
 
 LIBGDBSTUB = $(OUT)/libgdbstub.a
 SHELL_HACK := $(shell mkdir -p $(OUT))
@@ -17,11 +14,11 @@ LIBSRCS = $(shell find ./src -name '*.c')
 _LIB_OBJ =  $(notdir $(LIBSRCS))
 LIB_OBJ = $(_LIB_OBJ:%.c=$(OUT)/%.o)
 
-TEST_OBJ = $(OUT)/test.obj
-TEST_BIN = $(OUT)/test.bin
+TEST_OBJ = $(EMU_OUT)/test.obj
+TEST_BIN = $(EMU_OUT)/test.bin
 
 vpath %.c $(sort $(dir $(LIBSRCS)))
-.PHONY: all debug test clean
+.PHONY: all debug clean
 
 all: CFLAGS += -O3
 all: LDFLAGS += -O3
@@ -30,8 +27,6 @@ all: $(LIBGDBSTUB) $(GIT_HOOKS)
 debug: CFLAGS += -O3 -g -DDEBUG
 debug: LDFLAGS += -O3
 debug: $(LIBGDBSTUB)
-
-test: $(TEST_BIN)
 
 $(GIT_HOOKS):
 	@scripts/install-git-hooks
@@ -43,31 +38,24 @@ $(OUT)/%.o: %.c
 $(LIBGDBSTUB): $(LIB_OBJ)
 	$(AR) -rcs $@ $^
 
-$(TEST_OBJ): tests/test.c
-	riscv64-unknown-elf-gcc -march=rv64g -Wl,-Ttext=0x0 -nostdlib -g -o $@ $<
-
-$(TEST_BIN): $(TEST_OBJ)
-	riscv64-unknown-elf-objcopy -O binary $< $@
-
 
 build-emu: $(LIBGDBSTUB)
-	$(MAKE) -C emu
+	$(MAKE) -C emu O=$(EMU_OUT)
 
-run-gdbstub: $(TEST_BIN) build-emu
-	emu/build/emu $(TEST_BIN)
+run-gdbstub: build-emu
+	$(EMU_OUT)/emu $(TEST_BIN)
 
 GDBSTUB_COMM = 127.0.0.1:1234
-run-gdb: $(TEST_OBJ)
+run-gdb: build-emu
 	riscv64-unknown-elf-gdb                     \
 		-ex "file $(TEST_OBJ)"              \
 		-ex "set debug remote 1"            \
 		-ex "target remote $(GDBSTUB_COMM)" \
 
 clean:
+	$(MAKE) -C emu clean O=$(EMU_OUT)
 	$(RM) $(LIB_OBJ)
 	$(RM) $(LIBGDBSTUB)
-	$(RM) $(TEST_BIN)
-	$(RM) $(TEST_OBJ)
 	$(RM) $(OUT)/*.d
 
 -include $(OUT)/*.d

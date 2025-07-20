@@ -21,6 +21,8 @@
     } while (0)
 
 #define MEM_SIZE (1024)
+#define TOHOST_ADDR (MEM_SIZE - 4)
+
 struct mem {
     uint8_t *mem;
     size_t code_size;
@@ -54,7 +56,7 @@ static inline bool emu_is_halt(struct emu *emu)
     return __atomic_load_n(&emu->halt, __ATOMIC_RELAXED);
 }
 
-static void emu_exec(struct emu *emu, uint32_t inst)
+static int emu_exec(struct emu *emu, uint32_t inst)
 {
     uint8_t opcode = inst & 0x7f;
     uint8_t rd = (inst >> 7) & 0x1f;
@@ -80,14 +82,14 @@ static void emu_exec(struct emu *emu, uint32_t inst)
             ptr = emu->m.mem + emu->x[rs1] + imm;
             read_len(32, ptr, value);
             emu->x[rd] = value;
-            return;
+            return 0;
         case 0x3:
             // ld
             imm = (int32_t) (inst & 0xfff00000) >> 20;
             ptr = emu->m.mem + emu->x[rs1] + imm;
             read_len(64, ptr, value);
             emu->x[rd] = value;
-            return;
+            return 0;
         default:
             break;
         }
@@ -98,12 +100,12 @@ static void emu_exec(struct emu *emu, uint32_t inst)
             // addi
             imm = (int32_t) (inst & 0xfff00000) >> 20;
             emu->x[rd] = emu->x[rd] + imm;
-            return;
+            return 0;
         case 0x2:
             // slti
             imm = (int32_t) (inst & 0xfff00000) >> 20;
             emu->x[rd] = (int64_t) emu->x[rs1] < (int64_t) imm ? 1 : 0;
-            return;
+            return 0;
         default:
             break;
         }
@@ -114,7 +116,7 @@ static void emu_exec(struct emu *emu, uint32_t inst)
             // addiw
             imm = (int32_t) (inst & 0xfff00000) >> 20;
             emu->x[rd] = (int32_t) (((uint32_t) emu->x[rs1] + (uint32_t) imm));
-            return;
+            return 0;
         default:
             break;
         }
@@ -127,14 +129,14 @@ static void emu_exec(struct emu *emu, uint32_t inst)
                    (int32_t) ((inst >> 7) & 0x1f));
             ptr = emu->m.mem + emu->x[rs1] + imm;
             write_len(32, ptr, emu->x[rs2]);
-            return;
+            return 0;
         case 0x3:
             // sd
             imm = (((int32_t) (inst & 0xfe000000) >> 20) |
                    (int32_t) ((inst >> 7) & 0x1f));
             ptr = emu->m.mem + emu->x[rs1] + imm;
             write_len(64, ptr, emu->x[rs2]);
-            return;
+            return 0;
         default:
             break;
         }
@@ -146,7 +148,7 @@ static void emu_exec(struct emu *emu, uint32_t inst)
             case 0x00:
                 // add
                 emu->x[rd] = emu->x[rs1] + emu->x[rs2];
-                return;
+                return 0;
             default:
                 break;
             }
@@ -163,11 +165,11 @@ static void emu_exec(struct emu *emu, uint32_t inst)
                 // addw
                 emu->x[rd] =
                     (int32_t) ((uint32_t) emu->x[rs1] + (uint32_t) emu->x[rs2]);
-                return;
+                return 0;
             default:
                 break;
             }
-            return;
+            return 0;
         default:
             break;
         }
@@ -177,7 +179,7 @@ static void emu_exec(struct emu *emu, uint32_t inst)
         imm = (int32_t) (inst & 0xfff00000) >> 20;
         emu->x[rd] = emu->pc;
         emu->pc = (emu->x[rs1] + imm) & ~1;
-        return;
+        return 0;
     case 0x6f:
         // jal
         emu->x[rd] = emu->pc;
@@ -187,13 +189,14 @@ static void emu_exec(struct emu *emu, uint32_t inst)
               | (int32_t) ((inst >> 9) & 0x800)      // 11
               | (int32_t) ((inst >> 20) & 0x7fe);    // 10:1
         emu->pc = emu->pc + imm - 4;
-        return;
+        return 0;
     default:
         break;
     }
 
     printf("Not implemented or invalid instruction@%lx\n", emu->pc - 4);
     printf("opcode:%x, funct3:%x, funct7:%x\n", opcode, funct3, funct7);
+    return -1;
 }
 
 static void emu_init(struct emu *emu)
@@ -212,13 +215,17 @@ static int init_mem(struct mem *m, const char *filename)
     }
 
     FILE *fp = fopen(filename, "rb");
-    if (!fp) {
+    if (!fp)
         return -1;
-    }
 
     fseek(fp, 0, SEEK_END);
     size_t sz = ftell(fp) * sizeof(uint8_t);
     rewind(fp);
+
+    /* We leave extra four bytes as the hint stop the emulator, so
+     * the size of the binary should not exceed this. */
+    if (sz > TOHOST_ADDR)
+        return -1;
 
     m->mem = malloc(MEM_SIZE);
     if (!m->mem) {
@@ -300,15 +307,27 @@ static int emu_write_mem(void *args, size_t addr, size_t len, void *val)
 
 static gdb_action_t emu_cont(void *args)
 {
+    int ret;
     struct emu *emu = (struct emu *) args;
+    uint8_t *tohost_addr = emu->m.mem + TOHOST_ADDR;
 
     emu_start_run(emu);
     while (emu->pc < emu->m.code_size && emu->pc != emu->bp_addr &&
            !emu_is_halt(emu)) {
         uint32_t inst;
+        uint8_t value;
         emu_read_mem(args, emu->pc, 4, &inst);
         emu->pc += 4;
-        emu_exec(emu, inst);
+        ret = emu_exec(emu, inst);
+        if (ret < 0)
+            break;
+
+        /* We assume the binary that run on this emulator will
+         * be stopped after writing the specific memory address.
+         * In this way, we can simply design our testing binary. */
+        read_len(8, tohost_addr, value);
+        if (value)
+            break;
     }
 
     return ACT_RESUME;
