@@ -81,6 +81,13 @@ static void emu_exec(struct emu *emu, uint32_t inst)
             read_len(32, ptr, value);
             emu->x[rd] = value;
             return;
+        case 0x3:
+            // ld
+            imm = (int32_t) (inst & 0xfff00000) >> 20;
+            ptr = emu->m.mem + emu->x[rs1] + imm;
+            read_len(64, ptr, value);
+            emu->x[rd] = value;
+            return;
         default:
             break;
         }
@@ -96,6 +103,17 @@ static void emu_exec(struct emu *emu, uint32_t inst)
             // slti
             imm = (int32_t) (inst & 0xfff00000) >> 20;
             emu->x[rd] = (int64_t) emu->x[rs1] < (int64_t) imm ? 1 : 0;
+            return;
+        default:
+            break;
+        }
+        break;
+    case 0x1b:
+        switch (funct3) {
+        case 0x0:
+            // addiw
+            imm = (int32_t) (inst & 0xfff00000) >> 20;
+            emu->x[rd] = (int32_t) (((uint32_t) emu->x[rs1] + (uint32_t) imm));
             return;
         default:
             break;
@@ -154,6 +172,12 @@ static void emu_exec(struct emu *emu, uint32_t inst)
             break;
         }
         break;
+    case 0x67:
+        // jalr
+        imm = (int32_t) (inst & 0xfff00000) >> 20;
+        emu->x[rd] = emu->pc;
+        emu->pc = (emu->x[rs1] + imm) & ~1;
+        return;
     case 0x6f:
         // jal
         emu->x[rd] = emu->pc;
