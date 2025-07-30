@@ -99,7 +99,7 @@ static int emu_exec(struct emu *emu, uint32_t inst)
         case 0x0:
             // addi
             imm = (int32_t) (inst & 0xfff00000) >> 20;
-            emu->x[rd] = emu->x[rd] + imm;
+            emu->x[rd] = emu->x[rs1] + imm;
             return 0;
         case 0x2:
             // slti
@@ -157,6 +157,11 @@ static int emu_exec(struct emu *emu, uint32_t inst)
             break;
         }
         break;
+    case 0x37:
+        // lui
+        imm = (int32_t) (inst & 0xfff00000) >> 20;
+        emu->x[rd] = imm;
+        return 0;
     case 0x3b:
         switch (funct3) {
         case 0x0:
@@ -203,7 +208,7 @@ static void emu_init(struct emu *emu)
 {
     memset(emu, 0, sizeof(struct emu));
     emu->pc = 0;
-    emu->x[2] = MEM_SIZE;
+    emu->x[2] = TOHOST_ADDR;
     emu->bp_addr = -1;
     emu_halt(emu);
 }
