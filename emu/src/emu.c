@@ -110,6 +110,11 @@ static int emu_exec(struct emu *emu, uint32_t inst)
             break;
         }
         break;
+    case 0x17:
+        // auipc
+        imm = (int32_t) (inst & 0xfffff000);
+        emu->x[rd] = emu->pc + imm - 4;
+        return 0;
     case 0x1b:
         switch (funct3) {
         case 0x0:
