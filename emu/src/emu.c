@@ -123,6 +123,13 @@ static int emu_exec(struct emu *emu, uint32_t inst)
         break;
     case 0x23:
         switch (funct3) {
+        case 0x0:
+            // sb
+            imm = (((int32_t) (inst & 0xfe000000) >> 20) |
+                   (int32_t) ((inst >> 7) & 0x1f));
+            ptr = emu->m.mem + emu->x[rs1] + imm;
+            write_len(8, ptr, emu->x[rs2]);
+            return 0;
         case 0x2:
             // sw
             imm = (((int32_t) (inst & 0xfe000000) >> 20) |
