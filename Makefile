@@ -22,7 +22,7 @@ vpath %.c $(sort $(dir $(LIBSRCS)))
 
 all: CFLAGS += -O3
 all: LDFLAGS += -O3
-all: $(LIBGDBSTUB) $(GIT_HOOKS)
+all: $(LIBGDBSTUB)
 
 debug: CFLAGS += -O3 -g -DDEBUG
 debug: LDFLAGS += -O3
