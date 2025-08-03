@@ -5,6 +5,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#define DEBUG
+
 #include "gdbstub.h"
 
 #define read_len(bit, ptr, value)                             \
@@ -56,164 +58,251 @@ static inline bool emu_is_halt(struct emu *emu)
     return __atomic_load_n(&emu->halt, __ATOMIC_RELAXED);
 }
 
-static int emu_exec(struct emu *emu, uint32_t inst)
+typedef struct inst {
+    uint64_t inst;
+
+    uint8_t rd;
+    uint8_t rs1;
+    uint8_t rs2;
+    uint8_t funct3;
+    uint8_t funct7;
+} inst_t;
+
+static inline int opcode_3(struct emu *emu, inst_t *inst)
 {
-    uint8_t opcode = inst & 0x7f;
-    uint8_t rd = (inst >> 7) & 0x1f;
-    uint8_t rs1 = (inst >> 15) & 0x1f;
-    uint8_t rs2 = (inst >> 20) & 0x1f;
-    uint8_t funct3 = (inst >> 12) & 0x7;
-    uint8_t funct7 = (inst >> 25) & 0x7f;
-
     uint8_t *ptr;
-    uint64_t imm, value;
+    uint64_t value;
+    uint64_t imm = (int32_t) (inst->inst & 0xfff00000) >> 20;
 
-#ifdef DEBUG
-    printf("[%4lx] opcode: %2x, funct3: %x, funct7: %2x\n", emu->pc - 4, opcode,
-           funct3, funct7);
-#endif
-
-    switch (opcode) {
+    switch (inst->funct3) {
+    case 0x2:
+        // lw
+        ptr = emu->m.mem + emu->x[inst->rs1] + imm;
+        read_len(32, ptr, value);
+        emu->x[inst->rd] = value;
+        return 0;
     case 0x3:
-        switch (funct3) {
-        case 0x2:
-            // lw
-            imm = (int32_t) (inst & 0xfff00000) >> 20;
-            ptr = emu->m.mem + emu->x[rs1] + imm;
-            read_len(32, ptr, value);
-            emu->x[rd] = value;
-            return 0;
-        case 0x3:
-            // ld
-            imm = (int32_t) (inst & 0xfff00000) >> 20;
-            ptr = emu->m.mem + emu->x[rs1] + imm;
-            read_len(64, ptr, value);
-            emu->x[rd] = value;
-            return 0;
-        default:
-            break;
-        }
-        break;
-    case 0x13:
-        switch (funct3) {
-        case 0x0:
-            // addi
-            imm = (int32_t) (inst & 0xfff00000) >> 20;
-            emu->x[rd] = emu->x[rs1] + imm;
-            return 0;
-        case 0x2:
-            // slti
-            imm = (int32_t) (inst & 0xfff00000) >> 20;
-            emu->x[rd] = (int64_t) emu->x[rs1] < (int64_t) imm ? 1 : 0;
-            return 0;
-        default:
-            break;
-        }
-        break;
-    case 0x17:
-        // auipc
-        imm = (int32_t) (inst & 0xfffff000);
-        emu->x[rd] = emu->pc + imm - 4;
-        return 0;
-    case 0x1b:
-        switch (funct3) {
-        case 0x0:
-            // addiw
-            imm = (int32_t) (inst & 0xfff00000) >> 20;
-            emu->x[rd] = (int32_t) (((uint32_t) emu->x[rs1] + (uint32_t) imm));
-            return 0;
-        default:
-            break;
-        }
-        break;
-    case 0x23:
-        switch (funct3) {
-        case 0x0:
-            // sb
-            imm = (((int32_t) (inst & 0xfe000000) >> 20) |
-                   (int32_t) ((inst >> 7) & 0x1f));
-            ptr = emu->m.mem + emu->x[rs1] + imm;
-            write_len(8, ptr, emu->x[rs2]);
-            return 0;
-        case 0x2:
-            // sw
-            imm = (((int32_t) (inst & 0xfe000000) >> 20) |
-                   (int32_t) ((inst >> 7) & 0x1f));
-            ptr = emu->m.mem + emu->x[rs1] + imm;
-            write_len(32, ptr, emu->x[rs2]);
-            return 0;
-        case 0x3:
-            // sd
-            imm = (((int32_t) (inst & 0xfe000000) >> 20) |
-                   (int32_t) ((inst >> 7) & 0x1f));
-            ptr = emu->m.mem + emu->x[rs1] + imm;
-            write_len(64, ptr, emu->x[rs2]);
-            return 0;
-        default:
-            break;
-        }
-        break;
-    case 0x33:
-        switch (funct3) {
-        case 0x0:
-            switch (funct7) {
-            case 0x00:
-                // add
-                emu->x[rd] = emu->x[rs1] + emu->x[rs2];
-                return 0;
-            default:
-                break;
-            }
-            break;
-        default:
-            break;
-        }
-        break;
-    case 0x37:
-        // lui
-        imm = (int32_t) (inst & 0xfff00000) >> 20;
-        emu->x[rd] = imm;
-        return 0;
-    case 0x3b:
-        switch (funct3) {
-        case 0x0:
-            switch (funct7) {
-            case 0x00:
-                // addw
-                emu->x[rd] =
-                    (int32_t) ((uint32_t) emu->x[rs1] + (uint32_t) emu->x[rs2]);
-                return 0;
-            default:
-                break;
-            }
-            return 0;
-        default:
-            break;
-        }
-        break;
-    case 0x67:
-        // jalr
-        imm = (int32_t) (inst & 0xfff00000) >> 20;
-        emu->x[rd] = emu->pc;
-        emu->pc = (emu->x[rs1] + imm) & ~1;
-        return 0;
-    case 0x6f:
-        // jal
-        emu->x[rd] = emu->pc;
-        // imm[20|10:1|11|19:12] = inst[31|30:21|20|19:12]
-        imm = ((int32_t) (inst & 0x80000000) >> 11)  // 20
-              | (int32_t) ((inst & 0xff000))         // 19:12
-              | (int32_t) ((inst >> 9) & 0x800)      // 11
-              | (int32_t) ((inst >> 20) & 0x7fe);    // 10:1
-        emu->pc = emu->pc + imm - 4;
+        // ld
+        ptr = emu->m.mem + emu->x[inst->rs1] + imm;
+        read_len(64, ptr, value);
+        emu->x[inst->rd] = value;
         return 0;
     default:
         break;
     }
 
-    printf("Not implemented or invalid instruction@%lx\n", emu->pc - 4);
-    printf("opcode:%x, funct3:%x, funct7:%x\n", opcode, funct3, funct7);
     return -1;
+}
+
+static inline int opcode_13(struct emu *emu, inst_t *inst)
+{
+    uint64_t imm = (int32_t) (inst->inst & 0xfff00000) >> 20;
+
+    switch (inst->funct3) {
+    case 0x0:
+        // addi
+        emu->x[inst->rd] = emu->x[inst->rs1] + imm;
+        return 0;
+    case 0x2:
+        // slti
+        emu->x[inst->rd] = (int64_t) emu->x[inst->rs1] < (int64_t) imm ? 1 : 0;
+        return 0;
+    default:
+        break;
+    }
+
+    return -1;
+}
+
+static inline int opcode_17(struct emu *emu, inst_t *inst)
+{
+    // auipc
+    uint64_t imm = (int32_t) (inst->inst & 0xfffff000);
+    emu->x[inst->rd] = emu->pc + imm - 4;
+    return 0;
+}
+
+static inline int opcode_1b(struct emu *emu, inst_t *inst)
+{
+    uint64_t imm = (int32_t) (inst->inst & 0xfff00000) >> 20;
+
+    switch (inst->funct3) {
+    case 0x0:
+        // addiw
+        emu->x[inst->rd] =
+            (int32_t) (((uint32_t) emu->x[inst->rs1] + (uint32_t) imm));
+        return 0;
+    default:
+        break;
+    }
+
+    return -1;
+}
+
+static inline int opcode_23(struct emu *emu, inst_t *inst)
+{
+    uint8_t *ptr;
+    uint64_t imm = (((int32_t) (inst->inst & 0xfe000000) >> 20) |
+                    (int32_t) ((inst->inst >> 7) & 0x1f));
+
+    switch (inst->funct3) {
+    case 0x0:
+        // sb
+        ptr = emu->m.mem + emu->x[inst->rs1] + imm;
+        write_len(8, ptr, emu->x[inst->rs2]);
+        return 0;
+    case 0x2:
+        // sw
+        ptr = emu->m.mem + emu->x[inst->rs1] + imm;
+        write_len(32, ptr, emu->x[inst->rs2]);
+        return 0;
+    case 0x3:
+        // sd
+        ptr = emu->m.mem + emu->x[inst->rs1] + imm;
+        write_len(64, ptr, emu->x[inst->rs2]);
+        return 0;
+    default:
+        break;
+    }
+
+    return -1;
+}
+
+static inline int opcode_33(struct emu *emu, inst_t *inst)
+{
+    switch (inst->funct3) {
+    case 0x0:
+        switch (inst->funct7) {
+        case 0x00:
+            // add
+            emu->x[inst->rd] = emu->x[inst->rs1] + emu->x[inst->rs2];
+            return 0;
+        default:
+            break;
+        }
+        break;
+    default:
+        break;
+    }
+
+    return -1;
+}
+
+static inline int opcode_37(struct emu *emu, inst_t *inst)
+{
+    // lui
+    uint64_t imm = (int32_t) (inst->inst & 0xfff00000) >> 20;
+    emu->x[inst->rd] = imm;
+    return 0;
+}
+
+static inline int opcode_3b(struct emu *emu, inst_t *inst)
+{
+    switch (inst->funct3) {
+    case 0x0:
+        switch (inst->funct7) {
+        case 0x00:
+            // addw
+            emu->x[inst->rd] = (int32_t) ((uint32_t) emu->x[inst->rs1] +
+                                          (uint32_t) emu->x[inst->rs2]);
+            return 0;
+        default:
+            break;
+        }
+        break;
+    default:
+        break;
+    }
+
+    return -1;
+}
+
+static inline int opcode_67(struct emu *emu, inst_t *inst)
+{
+    // jalr
+    uint64_t imm = (int32_t) (inst->inst & 0xfff00000) >> 20;
+    emu->x[inst->rd] = emu->pc;
+    emu->pc = (emu->x[inst->rs1] + imm) & ~1;
+
+    return 0;
+}
+
+static inline int opcode_6f(struct emu *emu, inst_t *inst)
+{
+    uint64_t imm;
+
+    // jal
+    emu->x[inst->rd] = emu->pc;
+    // imm[20|10:1|11|19:12] = inst[31|30:21|20|19:12]
+    imm = ((int32_t) (inst->inst & 0x80000000) >> 11)  // 20
+          | (int32_t) ((inst->inst & 0xff000))         // 19:12
+          | (int32_t) ((inst->inst >> 9) & 0x800)      // 11
+          | (int32_t) ((inst->inst >> 20) & 0x7fe);    // 10:1
+    emu->pc = emu->pc + imm - 4;
+    return 0;
+}
+
+static int emu_exec(struct emu *emu, uint32_t raw_inst)
+{
+    int ret = -1;
+    uint8_t opcode = raw_inst & 0x7f;
+
+    inst_t inst;
+
+    inst.inst = raw_inst;
+    inst.rd = (raw_inst >> 7) & 0x1f;
+    inst.rs1 = (raw_inst >> 15) & 0x1f;
+    inst.rs2 = (raw_inst >> 20) & 0x1f;
+    inst.funct3 = (raw_inst >> 12) & 0x7;
+    inst.funct7 = (raw_inst >> 25) & 0x7f;
+
+#ifdef DEBUG
+    printf("[%4lx] opcode: %2x, funct3: %x, funct7: %2x\n", emu->pc - 4, opcode,
+           inst.funct3, inst.funct7);
+#endif
+
+    switch (opcode) {
+    case 0x3:
+        ret = opcode_3(emu, &inst);
+        break;
+    case 0x13:
+        ret = opcode_13(emu, &inst);
+        break;
+    case 0x17:
+        ret = opcode_17(emu, &inst);
+        break;
+    case 0x1b:
+        ret = opcode_1b(emu, &inst);
+        break;
+    case 0x23:
+        ret = opcode_23(emu, &inst);
+        break;
+    case 0x33:
+        ret = opcode_33(emu, &inst);
+        break;
+    case 0x37:
+        ret = opcode_37(emu, &inst);
+        break;
+    case 0x3b:
+        ret = opcode_3b(emu, &inst);
+        break;
+    case 0x67:
+        ret = opcode_67(emu, &inst);
+        break;
+    case 0x6f:
+        ret = opcode_6f(emu, &inst);
+        break;
+    default:
+        break;
+    }
+
+    if (ret != 0) {
+        printf("Not implemented or invalid instruction@%lx\n", emu->pc - 4);
+        printf("opcode:%x, funct3:%x, funct7:%x\n", opcode, inst.funct3,
+               inst.funct7);
+    }
+
+    return ret;
 }
 
 static void emu_init(struct emu *emu)
