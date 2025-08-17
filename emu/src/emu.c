@@ -191,7 +191,7 @@ static inline int opcode_33(struct emu *emu, inst_t *inst)
 static inline int opcode_37(struct emu *emu, inst_t *inst)
 {
     // lui
-    uint64_t imm = (int32_t) (inst->inst & 0xfff00000) >> 20;
+    uint64_t imm = (int32_t) (inst->inst & 0xfffff000);
     emu->x[inst->rd] = imm;
     return 0;
 }
@@ -295,6 +295,23 @@ static int emu_exec(struct emu *emu, uint32_t raw_inst)
     default:
         break;
     }
+
+#ifdef DEBUG
+    static char *abi_name[] = {
+        "z",  "ra", "sp", "gp", "tp",  "t0",  "t1", "t2", "s0", "s1", "a0",
+        "a1", "a2", "a3", "a4", "a5",  "a6",  "a7", "s2", "s3", "s4", "s5",
+        "s6", "s7", "s8", "s9", "s10", "s11", "t3", "t4", "t5", "t6"};
+
+    for (size_t i = 0; i < 32; i++) {
+        printf("x%-2ld(%-3s) = 0x%-16lx, ", i, abi_name[i], emu->x[i]);
+        if (!((i + 1) & 1))
+            printf("\n");
+    }
+    printf("\n");
+
+    if (emu->pc == 0x30)
+        exit(-1);
+#endif
 
     if (ret != 0) {
         printf("Not implemented or invalid instruction@%lx\n", emu->pc - 4);
