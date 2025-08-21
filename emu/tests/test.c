@@ -10,7 +10,7 @@ int main()
     /* Because the binary will be run on baremetal environment
      * which doesn't support C-runtime. Stop the program by writing
      * to this specicial address */
-    tohost_addr = (volatile char *) 0x1024 - 4;
+    tohost_addr = (volatile char *) (0x1000 - 4);
     *tohost_addr = 0xff;
     return 0;
 }

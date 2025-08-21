@@ -22,7 +22,7 @@
             *((ptr) + i) = (value >> (i << 3)) & 0xff; \
     } while (0)
 
-#define MEM_SIZE (1024)
+#define MEM_SIZE (0x1000)
 #define TOHOST_ADDR (MEM_SIZE - 4)
 
 struct mem {
@@ -249,6 +249,9 @@ static int emu_exec(struct emu *emu, uint32_t raw_inst)
 
     inst_t inst;
 
+    // Emulate register x0 to 0
+    emu->x[0] = 0;
+
     inst.inst = raw_inst;
     inst.rd = (raw_inst >> 7) & 0x1f;
     inst.rs1 = (raw_inst >> 15) & 0x1f;
@@ -308,9 +311,6 @@ static int emu_exec(struct emu *emu, uint32_t raw_inst)
             printf("\n");
     }
     printf("\n");
-
-    if (emu->pc == 0x30)
-        exit(-1);
 #endif
 
     if (ret != 0) {
