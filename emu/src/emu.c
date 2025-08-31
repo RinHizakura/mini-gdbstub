@@ -5,8 +5,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define DEBUG
-
 #include "gdbstub.h"
 
 #define read_len(bit, ptr, value)                             \

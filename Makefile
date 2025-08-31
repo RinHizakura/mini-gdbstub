@@ -14,8 +14,8 @@ LIBSRCS = $(shell find ./src -name '*.c')
 _LIB_OBJ =  $(notdir $(LIBSRCS))
 LIB_OBJ = $(_LIB_OBJ:%.c=$(OUT)/%.o)
 
-TEST_OBJ = $(EMU_OUT)/test.obj
-TEST_BIN = $(EMU_OUT)/test.bin
+TEST_OBJ = $(EMU_OUT)/emu_test.obj
+TEST_BIN = $(EMU_OUT)/emu_test.bin
 
 vpath %.c $(sort $(dir $(LIBSRCS)))
 .PHONY: all debug clean

@@ -1,4 +1,4 @@
-name: Build Check
+name: GDBStub Test
 
 on:
   push:         # Runs on push to any branch
@@ -6,7 +6,7 @@ on:
 
 jobs:
   build:
-    name: Build Project
+    name: GDBStub Test
     runs-on: ubuntu-latest
 
     steps:
@@ -18,9 +18,11 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y build-essential gcc-riscv64-unknown-elf
 
-      - name: Build project using Makefile
+      - name: Build project
         run: |
-          echo "Building library"
           make
-          echo "Building emu"
           make build-emu
+
+      - name: Run test script
+        run: |
+          .ci/gdbstub_cont_test.sh
