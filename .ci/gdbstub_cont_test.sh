@@ -25,8 +25,8 @@ OPTS+="-ex 'file $TEST_OBJ' "
 OPTS+="-ex 'target remote :1234' "
 OPTS+="-ex 'p \$pc' "
 OPTS+="-ex 'continue' "
+OPTS+="-ex 'q' "
 
-echo ${GDB} --batch ${OPTS}
 eval "${GDB} --batch ${OPTS}" > ${tmpfile}
 
 # Pass and wait
