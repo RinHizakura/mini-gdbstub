@@ -450,7 +450,7 @@ static gdb_action_t emu_cont(void *args)
          * In this way, we can simply design our testing binary. */
         read_len(8, tohost_addr, value);
         if (value)
-            break;
+            return ACT_SHUTDOWN;
     }
 
     return ACT_RESUME;
