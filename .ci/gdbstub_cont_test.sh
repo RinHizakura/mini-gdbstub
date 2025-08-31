@@ -2,7 +2,7 @@
 
 set -e
 
-GDB=riscv64-unknown-elf-gdb
+GDB=gdb-multiarch
 EMUDIR=build/emu
 TEST_NAME=emu_test
 TEST_OBJ=$EMUDIR/$TEST_NAME.obj
@@ -20,6 +20,7 @@ fi
 
 OPTS=
 tmpfile=/tmp/emu_test
+OPTS+="-ex 'set architecture riscv:rv64' "
 OPTS+="-ex 'file $TEST_OBJ' "
 OPTS+="-ex 'target remote :1234' "
 OPTS+="-ex 'p \$pc' "
