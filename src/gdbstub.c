@@ -3,8 +3,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/select.h>
 #include "conn.h"
 #include "gdb_signal.h"
+#include "packet.h"
 #include "regbuf.h"
 #include "utils/csum.h"
 #include "utils/translate.h"
@@ -37,14 +39,34 @@ static volatile bool thread_stop = false;
 static void *socket_reader(gdbstub_t *gdbstub)
 {
     void *args = gdbstub->priv->args;
+    int socket_fd = gdbstub->priv->conn.socket_fd;
 
-    /* This thread will only works when running the gdbstub routine,
-     * which won't procees on any packets. In this case, we read packet
-     * in another thread to be able to interrupt the gdbstub. */
+    fd_set readfds;
+    struct timeval timeout;
+
     while (!__atomic_load_n(&thread_stop, __ATOMIC_RELAXED)) {
-        if (async_io_is_enable(gdbstub->priv) &&
-            conn_try_recv_intr(&gdbstub->priv->conn)) {
-            gdbstub->ops->on_interrupt(args);
+        if (!async_io_is_enable(gdbstub->priv)) {
+            usleep(10000);
+            continue;
+        }
+
+        FD_ZERO(&readfds);
+        FD_SET(socket_fd, &readfds);
+
+        timeout.tv_sec = 0;
+        timeout.tv_usec = 100000;
+
+        int result = select(socket_fd + 1, &readfds, NULL, NULL, &timeout);
+
+        if (result > 0 && FD_ISSET(socket_fd, &readfds)) {
+            char ch;
+            ssize_t nread = read(socket_fd, &ch, 1);
+            if (nread == 1 && ch == INTR_CHAR) {
+                gdbstub->ops->on_interrupt(args);
+            }
+        } else if (result < 0) {
+            perror("select error in socket_reader");
+            break;
         }
     }
 
