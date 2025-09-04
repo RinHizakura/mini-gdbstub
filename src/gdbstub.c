@@ -46,7 +46,7 @@ static void *socket_reader(gdbstub_t *gdbstub)
 
     while (!__atomic_load_n(&thread_stop, __ATOMIC_RELAXED)) {
         if (!async_io_is_enable(gdbstub->priv)) {
-            usleep(10000);  // 10ms，等待 async_io 啟用
+            usleep(10000);
             continue;
         }
 
@@ -54,23 +54,20 @@ static void *socket_reader(gdbstub_t *gdbstub)
         FD_SET(socket_fd, &readfds);
 
         timeout.tv_sec = 0;
-        timeout.tv_usec = 100000;  // 100ms 超時
+        timeout.tv_usec = 100000;
 
         int result = select(socket_fd + 1, &readfds, NULL, NULL, &timeout);
 
         if (result > 0 && FD_ISSET(socket_fd, &readfds)) {
-            // 有中斷資料可讀
             char ch;
             ssize_t nread = read(socket_fd, &ch, 1);
             if (nread == 1 && ch == INTR_CHAR) {
                 gdbstub->ops->on_interrupt(args);
             }
         } else if (result < 0) {
-            // select() 錯誤，結束執行緒
             perror("select error in socket_reader");
             break;
         }
-        // result == 0 是超時，繼續迴圈檢查 thread_stop
     }
 
     return NULL;
