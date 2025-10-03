@@ -22,6 +22,7 @@
 
 #define MEM_SIZE (0x1000)
 #define TOHOST_ADDR (MEM_SIZE - 4)
+#define REGSZ 8  // 64-bit registers = 8 bytes
 
 struct mem {
     uint8_t *mem;
@@ -383,9 +384,9 @@ static int emu_read_reg(void *args, int regno, void *reg_value)
     }
 
     if (regno == 32) {
-        memcpy(reg_value, &emu->pc, 4);
+        memcpy(reg_value, &emu->pc, REGSZ);
     } else {
-        memcpy(reg_value, &emu->x[regno], 4);
+        memcpy(reg_value, &emu->x[regno], REGSZ);
     }
     return 0;
 }
@@ -399,9 +400,9 @@ static int emu_write_reg(void *args, int regno, void *data)
     }
 
     if (regno == 32) {
-        memcpy(&emu->pc, data, 4);
+        memcpy(&emu->pc, data, REGSZ);
     } else {
-        memcpy(&emu->x[regno], data, 4);
+        memcpy(&emu->x[regno], data, REGSZ);
     }
     return 0;
 }
