@@ -406,6 +406,17 @@ static void process_query(gdbstub_t *gdbstub, char *payload, void *args)
     }
 }
 
+/* Process vCont action (single action only, no thread selectors)
+ *
+ * Currently supported:
+ *   'c' - continue
+ *   's' - step
+ *
+ * TODO: Multi-action support (e.g., "c:all;s:tid") requires:
+ * - Loop through ';'-separated actions
+ * - Parse thread selector after ':'
+ * - Call set_cpu() for each thread-specific action
+ */
 static inline gdb_event_t process_vcont(gdbstub_t *gdbstub, char *args)
 {
     gdb_event_t event = EVENT_NONE;
@@ -424,6 +435,7 @@ static inline gdb_event_t process_vcont(gdbstub_t *gdbstub, char *args)
             SEND_EPERM(gdbstub);
         break;
     default:
+        /* Reject unsupported actions (including 'C'/'S' with signal) */
         SEND_EPERM(gdbstub);
         break;
     }
@@ -432,11 +444,26 @@ static inline gdb_event_t process_vcont(gdbstub_t *gdbstub, char *args)
 }
 
 #define VCONT_DESC "vCont;%s%s"
+
+/* Report vCont actions supported by this stub
+ *
+ * This stub advertises only 'c' (continue) and 's' (step), matching
+ * the behavior of other hardware emulators.
+ *
+ * NOT advertised:
+ * - 'C' (continue with signal) / 'S' (step with signal)
+ *   Reason: Signal support is for process debugging, not hardware emulation
+ *
+ * - Thread selectors (e.g., "c:tid", "s:all")
+ *   Reason: Current implementation processes single action only
+ *   set_cpu() must be called separately via 'H' packet
+ */
 static inline void process_vcont_support(gdbstub_t *gdbstub)
 {
     char packet_str[MAX_SEND_PACKET_SIZE];
-    char *str_s = (gdbstub->ops->stepi == NULL) ? "" : "s;S;";
-    char *str_c = (gdbstub->ops->cont == NULL) ? "" : "c;C;";
+    /* Only advertise 'c' and 's' (no signal support for hardware emulation) */
+    char *str_s = (gdbstub->ops->stepi == NULL) ? "" : "s;";
+    char *str_c = (gdbstub->ops->cont == NULL) ? "" : "c;";
     sprintf(packet_str, VCONT_DESC, str_s, str_c);
 
     conn_send_pktstr(&gdbstub->priv->conn, packet_str);
