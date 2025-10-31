@@ -125,6 +125,18 @@ addr_fail:
 #define SEND_EPERM(gdbstub) SEND_ERR(gdbstub, "E01")
 #define SEND_EINVAL(gdbstub) SEND_ERR(gdbstub, "E22")
 
+static gdb_event_t process_cont(gdbstub_t *gdbstub)
+{
+    gdb_event_t event = EVENT_NONE;
+
+    if (gdbstub->ops->cont != NULL)
+        event = EVENT_CONT;
+    else
+        SEND_EPERM(gdbstub);
+
+    return event;
+}
+
 static void process_reg_read(gdbstub_t *gdbstub, void *args)
 {
     char packet_str[MAX_SEND_PACKET_SIZE];
@@ -570,6 +582,9 @@ static gdb_event_t gdbstub_process_packet(gdbstub_t *gdbstub,
     gdb_event_t event = EVENT_NONE;
 
     switch (request) {
+    case 'c':
+        event = process_cont(gdbstub);
+        break;
     case 'g':
         if (gdbstub->ops->read_reg != NULL) {
             process_reg_read(gdbstub, args);
