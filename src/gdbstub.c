@@ -137,6 +137,18 @@ static gdb_event_t process_cont(gdbstub_t *gdbstub)
     return event;
 }
 
+static gdb_event_t process_stepi(gdbstub_t *gdbstub)
+{
+    gdb_event_t event = EVENT_NONE;
+
+    if (gdbstub->ops->stepi != NULL)
+        event = EVENT_STEP;
+    else
+        SEND_EPERM(gdbstub);
+
+    return event;
+}
+
 static void process_reg_read(gdbstub_t *gdbstub, void *args)
 {
     char packet_str[MAX_SEND_PACKET_SIZE];
@@ -608,6 +620,9 @@ static gdb_event_t gdbstub_process_packet(gdbstub_t *gdbstub,
         break;
     case 'q':
         process_query(gdbstub, payload, args);
+        break;
+    case 's':
+        event = process_stepi(gdbstub);
         break;
     case 'v':
         event = process_vpacket(gdbstub, payload);
