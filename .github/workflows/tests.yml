@@ -23,6 +23,10 @@ jobs:
           make
           make build-emu
 
-      - name: Run test script
+      - name: Run cont test script
         run: |
           .ci/gdbstub_cont_test.sh
+
+      - name: Run breakpoint test script
+        run: |
+          .ci/gdbstub_bp_test.sh
