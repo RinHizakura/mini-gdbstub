@@ -22,7 +22,11 @@
 
 #define MEM_SIZE (0x1000)
 #define TOHOST_ADDR (MEM_SIZE - 4)
+#ifdef RV32
+#define REGSZ 4  // 32-bit registers = 4 bytes
+#else
 #define REGSZ 8  // 64-bit registers = 8 bytes
+#endif
 
 struct mem {
     uint8_t *mem;
@@ -313,7 +317,8 @@ static int emu_exec(struct emu *emu, uint32_t raw_inst)
 #endif
 
     if (ret != 0) {
-        printf("Not implemented or invalid instruction@%lx\n", emu->pc - 4);
+        printf("Not implemented or invalid instruction@%llx\n",
+               (unsigned long long) (emu->pc - 4));
         printf("opcode:%x, funct3:%x, funct7:%x\n", opcode, inst.funct3,
                inst.funct7);
     }
@@ -373,7 +378,7 @@ static void free_mem(struct mem *m)
 
 static size_t emu_get_reg_bytes(int regno __attribute__((unused)))
 {
-    return 8;
+    return REGSZ;
 }
 
 static int emu_read_reg(void *args, int regno, void *reg_value)
@@ -530,7 +535,11 @@ int main(int argc, char *argv[])
                       (arch_info_t){
                           .smp = 1,
                           .reg_num = 33,
+#ifdef RV32
+                          .target_desc = TARGET_RV32,
+#else
                           .target_desc = TARGET_RV64,
+#endif
                       },
                       "127.0.0.1:1234")) {
         fprintf(stderr, "Fail to create socket.\n");
