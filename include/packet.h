@@ -20,6 +20,7 @@ typedef struct {
     int size;    /* the size for all valid characters in data buffer */
     int cap;     /* the capacity (1 << cap) of the data buffer */
     int end_pos; /* the end position of the first packet in data buffer */
+    int start;
     uint8_t *data;
 } pktbuf_t;
 
