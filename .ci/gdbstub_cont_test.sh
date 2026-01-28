@@ -15,31 +15,23 @@
 #   GDB_PORT        Port for GDB connection (default: 1234)
 #
 
-TMPFILE="/tmp/gdbstub_cont_test_$$"
 TESTCASE="GDB Continue Test"
 source "$(dirname "$0")/test_common.sh"
+TMPFILE=$(create_temp_file "gdbstub_cont_test")
 
 run_continue_test()
 {
-    local gdb_arch
-    gdb_arch=$(get_gdb_arch)
-
-    # Register cleanup function
-    register_cleanup cleanup_test
+    init_test
 
     # Create GDB command script
-    cat > "$TMPFILE.gdb" << EOF
-set pagination off
-set confirm off
-set architecture $gdb_arch
-file $TEST_OBJ
-target remote :$GDB_PORT
-printf "PC before continue: %p\\n", \$pc
+    gdb_script_header > "$TMPFILE.gdb"
+    cat >> "$TMPFILE.gdb" << 'EOF'
+printf "PC before continue: %p\n", $pc
 continue
 quit
 EOF
 
-    run_gdb_test_script $TMPFILE.gdb $TESTCASE
+    run_gdb_test_script "$TMPFILE.gdb" "$TESTCASE"
 
     # Check GDB output for success indicators
     if grep -q "PC before continue:" "$TMPFILE"; then
@@ -49,7 +41,7 @@ EOF
         test_pass "$TESTCASE ($ARCH)"
         return 0
     else
-        test_fail $TESTCASE "Failed to read PC"
+        test_fail "$TESTCASE" "Failed to read PC"
         print_error "GDB output:"
         cat "$TMPFILE" >&2
         return 1

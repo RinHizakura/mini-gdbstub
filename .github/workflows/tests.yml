@@ -80,16 +80,44 @@ jobs:
           make build-emu ARCH=${{ matrix.arch }} CROSS_COMPILE=${{ matrix.cross_compile }}
 
       - name: Run continue test
+        id: test-continue
+        continue-on-error: true
         run: |
           export PATH="/opt/riscv/${{ matrix.toolchain_arch }}/bin:$PATH"
           export CROSS_COMPILE=${{ matrix.cross_compile }}
           ARCH=${{ matrix.arch }} .ci/gdbstub_cont_test.sh
 
       - name: Run breakpoint test
+        id: test-breakpoint
+        continue-on-error: true
         run: |
           export PATH="/opt/riscv/${{ matrix.toolchain_arch }}/bin:$PATH"
           export CROSS_COMPILE=${{ matrix.cross_compile }}
           ARCH=${{ matrix.arch }} .ci/gdbstub_bp_test.sh
+
+      - name: Run single register write test
+        id: test-regwrite-single
+        continue-on-error: true
+        run: |
+          export PATH="/opt/riscv/${{ matrix.toolchain_arch }}/bin:$PATH"
+          export CROSS_COMPILE=${{ matrix.cross_compile }}
+          ARCH=${{ matrix.arch }} .ci/gdbstub_regwrite_single_test.sh
+
+      - name: Run bulk register reject test
+        id: test-regwrite-bulk-reject
+        continue-on-error: true
+        run: |
+          export PATH="/opt/riscv/${{ matrix.toolchain_arch }}/bin:$PATH"
+          export CROSS_COMPILE=${{ matrix.cross_compile }}
+          ARCH=${{ matrix.arch }} .ci/gdbstub_regwrite_bulk_reject_test.sh
+
+      - name: Run bulk register roundtrip test
+        id: test-regwrite-bulk-roundtrip
+        continue-on-error: true
+        run: |
+          export PATH="/opt/riscv/${{ matrix.toolchain_arch }}/bin:$PATH"
+          export CROSS_COMPILE=${{ matrix.cross_compile }}
+          ARCH=${{ matrix.arch }} .ci/gdbstub_regwrite_bulk_roundtrip_test.sh
 
       - name: Test Summary
         if: always()
@@ -98,8 +126,23 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Test | Status |" >> $GITHUB_STEP_SUMMARY
           echo "|------|--------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Continue Test | ${{ job.status == 'success' && 'PASSED' || 'FAILED' }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Breakpoint Test | ${{ job.status == 'success' && 'PASSED' || 'FAILED' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Continue Test | ${{ steps.test-continue.outcome == 'success' && 'PASSED' || 'FAILED' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Breakpoint Test | ${{ steps.test-breakpoint.outcome == 'success' && 'PASSED' || 'FAILED' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Single Register Write | ${{ steps.test-regwrite-single.outcome == 'success' && 'PASSED' || 'FAILED' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Bulk Register Reject | ${{ steps.test-regwrite-bulk-reject.outcome == 'success' && 'PASSED' || 'FAILED' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Bulk Register Roundtrip | ${{ steps.test-regwrite-bulk-roundtrip.outcome == 'success' && 'PASSED' || 'FAILED' }} |" >> $GITHUB_STEP_SUMMARY
+
+      - name: Fail if any test failed
+        if: always()
+        run: |
+          if [[ "${{ steps.test-continue.outcome }}" != "success" ]] || \
+             [[ "${{ steps.test-breakpoint.outcome }}" != "success" ]] || \
+             [[ "${{ steps.test-regwrite-single.outcome }}" != "success" ]] || \
+             [[ "${{ steps.test-regwrite-bulk-reject.outcome }}" != "success" ]] || \
+             [[ "${{ steps.test-regwrite-bulk-roundtrip.outcome }}" != "success" ]]; then
+            echo "One or more tests failed"
+            exit 1
+          fi
 
   # Summary job that depends on all test jobs
   test-summary:

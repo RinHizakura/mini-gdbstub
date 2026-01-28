@@ -15,40 +15,32 @@
 #   GDB_PORT        Port for GDB connection (default: 1234)
 #
 
-TMPFILE="/tmp/gdbstub_bp_test_$$"
 TESTCASE="GDB Breakpoint Test"
 source "$(dirname "$0")/test_common.sh"
+TMPFILE=$(create_temp_file "gdbstub_bp_test")
 
 run_breakpoint_test()
 {
-    local gdb_arch
-    gdb_arch=$(get_gdb_arch)
-
-    # Register cleanup function
-    register_cleanup cleanup_test
+    init_test
 
     # Create GDB command script
-    cat > "$TMPFILE.gdb" << EOF
-set pagination off
-set confirm off
-set architecture $gdb_arch
-file $TEST_OBJ
-target remote :$GDB_PORT
+    gdb_script_header > "$TMPFILE.gdb"
+    cat >> "$TMPFILE.gdb" << 'EOF'
 
 # Set breakpoint on 'add' function
 break add
-printf "Breakpoint set on 'add' function\\n"
+printf "Breakpoint set on 'add' function\n"
 
 # Continue to breakpoint
 continue
-printf "Hit breakpoint, PC = %p\\n", \$pc
+printf "Hit breakpoint, PC = %p\n", $pc
 
 # Continue to completion
 continue
 quit
 EOF
 
-    run_gdb_test_script $TMPFILE.gdb $TESTCASE
+    run_gdb_test_script "$TMPFILE.gdb" "$TESTCASE"
 
     # Check GDB output for breakpoint set and hit
     local breakpoint_set=false
@@ -74,12 +66,12 @@ EOF
         test_pass "$TESTCASE ($ARCH)"
         return 0
     elif [[ "$breakpoint_set" == "false" ]]; then
-        test_fail $TESTCASE "Breakpoint was not set"
+        test_fail "$TESTCASE" "Breakpoint was not set"
         print_error "GDB output:"
         cat "$TMPFILE" >&2
         return 1
     else
-        test_fail $TESTCASE "Breakpoint was set but never hit"
+        test_fail "$TESTCASE" "Breakpoint was set but never hit"
         print_error "GDB output:"
         cat "$TMPFILE" >&2
         return 1
