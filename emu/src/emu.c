@@ -7,6 +7,9 @@
 
 #include "gdbstub.h"
 
+/* Sentinel value for unset breakpoint address */
+#define BP_ADDR_INVALID UINT64_MAX
+
 #define read_len(bit, ptr, value)                             \
     do {                                                      \
         value = 0;                                            \
@@ -38,8 +41,18 @@ struct emu {
     uint64_t x[32];
     uint64_t pc;
 
+    /* Software breakpoint */
     bool bp_is_set;
     uint64_t bp_addr;
+
+    /* Hardware watchpoint (single watchpoint support for demo) */
+    bool wp_is_set;
+    uint64_t wp_addr;
+    size_t wp_len;
+    bp_type_t wp_type;
+
+    /* Watchpoint hit flag - set when a watchpoint triggers during execution */
+    bool wp_hit;
 
     bool halt;
 
@@ -61,6 +74,49 @@ static inline bool emu_is_halt(struct emu *emu)
     return __atomic_load_n(&emu->halt, __ATOMIC_RELAXED);
 }
 
+/**
+ * Check if a memory access [addr, addr+len) overlaps with an active watchpoint.
+ * @param emu Emulator state
+ * @param addr Access start address
+ * @param len Access length
+ * @param is_write true for write access, false for read access
+ * @return true if watchpoint is triggered
+ */
+static inline bool emu_check_watchpoint(struct emu *emu,
+                                        uint64_t addr,
+                                        size_t len,
+                                        bool is_write)
+{
+    if (!emu->wp_is_set)
+        return false;
+
+    /* Check if the access type matches the watchpoint type */
+    bool type_match = false;
+    switch (emu->wp_type) {
+    case WP_WRITE:
+        type_match = is_write;
+        break;
+    case WP_READ:
+        type_match = !is_write;
+        break;
+    case WP_ACCESS:
+        type_match = true;
+        break;
+    default:
+        return false;
+    }
+
+    if (!type_match)
+        return false;
+
+    /* Check if address ranges overlap: [addr, addr+len) vs [wp_addr,
+     * wp_addr+wp_len) */
+    uint64_t access_end = addr + len;
+    uint64_t wp_end = emu->wp_addr + emu->wp_len;
+
+    return (addr < wp_end) && (emu->wp_addr < access_end);
+}
+
 typedef struct inst {
     uint64_t inst;
 
@@ -76,19 +132,43 @@ static inline int opcode_3(struct emu *emu, inst_t *inst)
     uint8_t *ptr;
     uint64_t value;
     uint64_t imm = (int32_t) (inst->inst & 0xfff00000) >> 20;
+    uint64_t addr;
+    size_t access_len;
 
     switch (inst->funct3) {
     case 0x2:
-        // lw
-        ptr = emu->m.mem + emu->x[inst->rs1] + imm;
+        /* lw - load word (4 bytes) */
+        access_len = 4;
+        addr = emu->x[inst->rs1] + imm;
+        /* Bounds check: ensure addr and access_len don't exceed memory */
+        if (addr >= MEM_SIZE || access_len > MEM_SIZE - addr)
+            return -1;
+        /* Perform the load first */
+        ptr = emu->m.mem + addr;
         read_len(32, ptr, value);
         emu->x[inst->rd] = value;
+        /* Check read watchpoint AFTER completing the access (hardware
+         * semantics)
+         */
+        if (emu_check_watchpoint(emu, addr, access_len, false))
+            emu->wp_hit = true;
         return 0;
     case 0x3:
-        // ld
-        ptr = emu->m.mem + emu->x[inst->rs1] + imm;
+        /* ld - load double (8 bytes) */
+        access_len = 8;
+        addr = emu->x[inst->rs1] + imm;
+        /* Bounds check */
+        if (addr >= MEM_SIZE || access_len > MEM_SIZE - addr)
+            return -1;
+        /* Perform the load first */
+        ptr = emu->m.mem + addr;
         read_len(64, ptr, value);
         emu->x[inst->rd] = value;
+        /* Check read watchpoint AFTER completing the access (hardware
+         * semantics)
+         */
+        if (emu_check_watchpoint(emu, addr, access_len, false))
+            emu->wp_hit = true;
         return 0;
     default:
         break;
@@ -147,22 +227,54 @@ static inline int opcode_23(struct emu *emu, inst_t *inst)
     uint8_t *ptr;
     uint64_t imm = (((int32_t) (inst->inst & 0xfe000000) >> 20) |
                     (int32_t) ((inst->inst >> 7) & 0x1f));
+    uint64_t addr;
+    size_t access_len;
 
     switch (inst->funct3) {
     case 0x0:
-        // sb
-        ptr = emu->m.mem + emu->x[inst->rs1] + imm;
+        /* sb - store byte (1 byte) */
+        access_len = 1;
+        addr = emu->x[inst->rs1] + imm;
+        /* Bounds check */
+        if (addr >= MEM_SIZE || access_len > MEM_SIZE - addr)
+            return -1;
+        /* Perform the store first */
+        ptr = emu->m.mem + addr;
         write_len(8, ptr, emu->x[inst->rs2]);
+        /* Check write watchpoint AFTER completing the access (hardware
+         * semantics) */
+        if (emu_check_watchpoint(emu, addr, access_len, true))
+            emu->wp_hit = true;
         return 0;
     case 0x2:
-        // sw
-        ptr = emu->m.mem + emu->x[inst->rs1] + imm;
+        /* sw - store word (4 bytes) */
+        access_len = 4;
+        addr = emu->x[inst->rs1] + imm;
+        /* Bounds check */
+        if (addr >= MEM_SIZE || access_len > MEM_SIZE - addr)
+            return -1;
+        /* Perform the store first */
+        ptr = emu->m.mem + addr;
         write_len(32, ptr, emu->x[inst->rs2]);
+        /* Check write watchpoint AFTER completing the access (hardware
+         * semantics) */
+        if (emu_check_watchpoint(emu, addr, access_len, true))
+            emu->wp_hit = true;
         return 0;
     case 0x3:
-        // sd
-        ptr = emu->m.mem + emu->x[inst->rs1] + imm;
+        /* sd - store double (8 bytes) */
+        access_len = 8;
+        addr = emu->x[inst->rs1] + imm;
+        /* Bounds check */
+        if (addr >= MEM_SIZE || access_len > MEM_SIZE - addr)
+            return -1;
+        /* Perform the store first */
+        ptr = emu->m.mem + addr;
         write_len(64, ptr, emu->x[inst->rs2]);
+        /* Check write watchpoint AFTER completing the access (hardware
+         * semantics) */
+        if (emu_check_watchpoint(emu, addr, access_len, true))
+            emu->wp_hit = true;
         return 0;
     default:
         break;
@@ -316,7 +428,9 @@ static int emu_exec(struct emu *emu, uint32_t raw_inst)
     printf("\n");
 #endif
 
-    if (ret != 0) {
+    if (ret < 0) {
+        /* Only print error for actual failures, not watchpoint hits (ret > 0)
+         */
         printf("Not implemented or invalid instruction@%llx\n",
                (unsigned long long) (emu->pc - 4));
         printf("opcode:%x, funct3:%x, funct7:%x\n", opcode, inst.funct3,
@@ -331,7 +445,8 @@ static void emu_init(struct emu *emu)
     memset(emu, 0, sizeof(struct emu));
     emu->pc = 0;
     emu->x[2] = TOHOST_ADDR;
-    emu->bp_addr = -1;
+    emu->bp_addr = BP_ADDR_INVALID;
+    emu->wp_hit = false;
     emu_halt(emu);
 }
 
@@ -396,38 +511,36 @@ static int emu_read_reg(void *args, int regno, void *reg_value)
     return 0;
 }
 
-static int emu_write_reg(void *args, int regno, void *data)
+static int emu_write_reg(void *args, int regno, const void *data)
 {
     struct emu *emu = (struct emu *) args;
 
-    if (regno > 32) {
+    if (regno > 32)
         return EFAULT;
-    }
 
-    if (regno == 32) {
+    if (regno == 32)
         memcpy(&emu->pc, data, REGSZ);
-    } else {
+    else
         memcpy(&emu->x[regno], data, REGSZ);
-    }
     return 0;
 }
 
 static int emu_read_mem(void *args, size_t addr, size_t len, void *val)
 {
     struct emu *emu = (struct emu *) args;
-    if (addr + len > MEM_SIZE) {
+    /* Safe overflow check: addr + len > MEM_SIZE without overflow */
+    if (addr >= MEM_SIZE || len > MEM_SIZE - addr)
         return EFAULT;
-    }
     memcpy(val, (void *) emu->m.mem + addr, len);
     return 0;
 }
 
-static int emu_write_mem(void *args, size_t addr, size_t len, void *val)
+static int emu_write_mem(void *args, size_t addr, size_t len, const void *val)
 {
     struct emu *emu = (struct emu *) args;
-    if (addr + len > MEM_SIZE) {
+    /* Safe overflow check: addr + len > MEM_SIZE without overflow */
+    if (addr >= MEM_SIZE || len > MEM_SIZE - addr)
         return EFAULT;
-    }
     memcpy((void *) emu->m.mem + addr, val, len);
     return 0;
 }
@@ -439,14 +552,19 @@ static gdb_action_t emu_cont(void *args)
     uint8_t *tohost_addr = emu->m.mem + TOHOST_ADDR;
 
     emu_start_run(emu);
+    emu->wp_hit = false; /* Clear watchpoint hit flag before running */
+
     while (emu->pc < emu->m.code_size && emu->pc != emu->bp_addr &&
-           !emu_is_halt(emu)) {
+           !emu_is_halt(emu) && !emu->wp_hit) {
         uint32_t inst;
         uint8_t value;
         emu_read_mem(args, emu->pc, 4, &inst);
         emu->pc += 4;
         ret = emu_exec(emu, inst);
         if (ret < 0)
+            break;
+        /* Watchpoint hit during instruction execution */
+        if (emu->wp_hit)
             break;
 
         /* We assume the binary that run on this emulator will
@@ -465,38 +583,88 @@ static gdb_action_t emu_stepi(void *args)
     struct emu *emu = (struct emu *) args;
 
     emu_start_run(emu);
+    emu->wp_hit = false; /* Clear watchpoint hit flag before stepping */
+
     if (emu->pc < emu->m.code_size) {
         uint32_t inst;
         emu_read_mem(args, emu->pc, 4, &inst);
         emu->pc += 4;
         emu_exec(emu, inst);
+        /* Watchpoint may have been hit during instruction execution */
     }
 
     return ACT_RESUME;
 }
 
-static bool emu_set_bp(void *args, size_t addr, bp_type_t type)
-{
-    struct emu *emu = (struct emu *) args;
-    if (type != BP_SOFTWARE || emu->bp_is_set)
-        return false;
-
-    emu->bp_is_set = true;
-    emu->bp_addr = addr;
-    return true;
-}
-
-static bool emu_del_bp(void *args, size_t addr, bp_type_t type)
+static bool emu_set_bp(void *args, size_t addr, size_t len, bp_type_t type)
 {
     struct emu *emu = (struct emu *) args;
 
-    // It's fine when there's no matching breakpoint, just doing nothing
-    if (type != BP_SOFTWARE || !emu->bp_is_set || emu->bp_addr != addr)
+    switch (type) {
+    case BP_SOFTWARE:
+    case BP_HARDWARE:
+        /* Software and hardware breakpoints share the same slot for simplicity
+         */
+        if (emu->bp_is_set)
+            return false;
+        emu->bp_is_set = true;
+        emu->bp_addr = addr;
+        (void) len; /* len/kind indicates instruction size, unused here */
         return true;
 
-    emu->bp_is_set = false;
-    emu->bp_addr = 0;
-    return true;
+    case WP_WRITE:
+    case WP_READ:
+    case WP_ACCESS:
+        /* Single watchpoint support */
+        if (emu->wp_is_set)
+            return false;
+        /* Validate watchpoint range: reject zero length, out-of-bounds, or
+         * overflow.
+         */
+        if (len == 0 || addr >= MEM_SIZE || len > MEM_SIZE - addr)
+            return false;
+        emu->wp_is_set = true;
+        emu->wp_addr = addr;
+        emu->wp_len = len;
+        emu->wp_type = type;
+        return true;
+
+    default:
+        return false;
+    }
+}
+
+static bool emu_del_bp(void *args, size_t addr, size_t len, bp_type_t type)
+{
+    struct emu *emu = (struct emu *) args;
+
+    switch (type) {
+    case BP_SOFTWARE:
+    case BP_HARDWARE:
+        /* Match by address; len is instruction size (informational only) */
+        if (!emu->bp_is_set || emu->bp_addr != addr)
+            return true; /* No matching breakpoint, success (idempotent) */
+        emu->bp_is_set = false;
+        emu->bp_addr = BP_ADDR_INVALID;
+        (void) len; /* len/kind is instruction size, not used for matching */
+        return true;
+
+    case WP_WRITE:
+    case WP_READ:
+    case WP_ACCESS:
+        /* Match by address, len, and type for precise watchpoint deletion */
+        if (!emu->wp_is_set || emu->wp_addr != addr || emu->wp_len != len ||
+            emu->wp_type != type)
+            return true; /* No matching watchpoint, success (idempotent) */
+        emu->wp_is_set = false;
+        emu->wp_addr = 0;
+        emu->wp_len = 0;
+        /* Leave wp_type as-is; wp_is_set=false is the authoritative flag */
+        return true;
+
+    default:
+        return false;
+    }
 }
 
 static void emu_on_interrupt(void *args)

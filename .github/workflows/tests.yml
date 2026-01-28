@@ -95,6 +95,14 @@ jobs:
           export CROSS_COMPILE=${{ matrix.cross_compile }}
           ARCH=${{ matrix.arch }} .ci/gdbstub_bp_test.sh
 
+      - name: Run watchpoint test
+        id: test-watchpoint
+        continue-on-error: true
+        run: |
+          export PATH="/opt/riscv/${{ matrix.toolchain_arch }}/bin:$PATH"
+          export CROSS_COMPILE=${{ matrix.cross_compile }}
+          ARCH=${{ matrix.arch }} .ci/gdbstub_wp_test.sh
+
       - name: Run single register write test
         id: test-regwrite-single
         continue-on-error: true
@@ -128,6 +136,7 @@ jobs:
           echo "|------|--------|" >> $GITHUB_STEP_SUMMARY
           echo "| Continue Test | ${{ steps.test-continue.outcome == 'success' && 'PASSED' || 'FAILED' }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Breakpoint Test | ${{ steps.test-breakpoint.outcome == 'success' && 'PASSED' || 'FAILED' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Watchpoint Test | ${{ steps.test-watchpoint.outcome == 'success' && 'PASSED' || 'FAILED' }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Single Register Write | ${{ steps.test-regwrite-single.outcome == 'success' && 'PASSED' || 'FAILED' }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Bulk Register Reject | ${{ steps.test-regwrite-bulk-reject.outcome == 'success' && 'PASSED' || 'FAILED' }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Bulk Register Roundtrip | ${{ steps.test-regwrite-bulk-roundtrip.outcome == 'success' && 'PASSED' || 'FAILED' }} |" >> $GITHUB_STEP_SUMMARY
@@ -137,6 +146,7 @@ jobs:
         run: |
           if [[ "${{ steps.test-continue.outcome }}" != "success" ]] || \
              [[ "${{ steps.test-breakpoint.outcome }}" != "success" ]] || \
+             [[ "${{ steps.test-watchpoint.outcome }}" != "success" ]] || \
              [[ "${{ steps.test-regwrite-single.outcome }}" != "success" ]] || \
              [[ "${{ steps.test-regwrite-bulk-reject.outcome }}" != "success" ]] || \
              [[ "${{ steps.test-regwrite-bulk-roundtrip.outcome }}" != "success" ]]; then
