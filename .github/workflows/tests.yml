@@ -1,32 +1,122 @@
-name: GDBStub Test
+name: GDBStub Tests
 
 on:
-  push:         # Runs on push to any branch
-  pull_request: # Runs on PRs targeting any branch
+  push:
+  pull_request:
+
+env:
+  TOOLCHAIN_VERSION: "2025.01.20"
+  TOOLCHAIN_CACHE_DIR: /home/runner/.cache/riscv-toolchain
 
 jobs:
-  build:
-    name: GDBStub Test
-    runs-on: ubuntu-latest
+  build-and-test:
+    name: Test ${{ matrix.arch }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [rv32, rv64]
+        include:
+          - arch: rv32
+            cross_compile: riscv32-unknown-elf-
+            toolchain_arch: riscv32
+          - arch: rv64
+            cross_compile: riscv64-unknown-elf-
+            toolchain_arch: riscv64
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Install build tools
+      - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential gdb-multiarch gcc-riscv64-unknown-elf
+          sudo apt-get install -y build-essential gdb-multiarch
 
-      - name: Build project
-        run: |
-          make
-          make build-emu
+      - name: Cache RISC-V toolchain
+        id: cache-toolchain
+        uses: actions/cache@v4
+        with:
+          path: |
+            /opt/riscv/${{ matrix.toolchain_arch }}
+            ${{ env.TOOLCHAIN_CACHE_DIR }}
+          key: riscv-toolchain-${{ matrix.toolchain_arch }}-${{ env.TOOLCHAIN_VERSION }}-ubuntu-24.04
 
-      - name: Run cont test script
+      - name: Download RISC-V toolchain
+        if: steps.cache-toolchain.outputs.cache-hit != 'true'
         run: |
-          .ci/gdbstub_cont_test.sh
+          mkdir -p ${{ env.TOOLCHAIN_CACHE_DIR }}
+          TOOLCHAIN_FILE="${{ matrix.toolchain_arch }}-elf-ubuntu-24.04-gcc-nightly-${{ env.TOOLCHAIN_VERSION }}-nightly.tar.xz"
+          TOOLCHAIN_URL="https://github.com/riscv-collab/riscv-gnu-toolchain/releases/download/${{ env.TOOLCHAIN_VERSION }}/${TOOLCHAIN_FILE}"
 
-      - name: Run breakpoint test script
+          echo "Downloading: $TOOLCHAIN_URL"
+          curl -fsSL --retry 5 --retry-delay 2 -o "${{ env.TOOLCHAIN_CACHE_DIR }}/${TOOLCHAIN_FILE}" "$TOOLCHAIN_URL"
+
+          echo "Extracting toolchain..."
+          sudo mkdir -p /opt/riscv/${{ matrix.toolchain_arch }}
+          sudo tar -xJf "${{ env.TOOLCHAIN_CACHE_DIR }}/${TOOLCHAIN_FILE}" -C /opt/riscv/${{ matrix.toolchain_arch }} --strip-components=1
+
+      - name: Extract cached toolchain
+        if: steps.cache-toolchain.outputs.cache-hit == 'true'
         run: |
-          .ci/gdbstub_bp_test.sh
+          TOOLCHAIN_FILE="${{ matrix.toolchain_arch }}-elf-ubuntu-24.04-gcc-nightly-${{ env.TOOLCHAIN_VERSION }}-nightly.tar.xz"
+          if [[ -f "${{ env.TOOLCHAIN_CACHE_DIR }}/${TOOLCHAIN_FILE}" ]] && [[ ! -d /opt/riscv/${{ matrix.toolchain_arch }}/bin ]]; then
+            echo "Extracting cached toolchain..."
+            sudo mkdir -p /opt/riscv/${{ matrix.toolchain_arch }}
+            sudo tar -xJf "${{ env.TOOLCHAIN_CACHE_DIR }}/${TOOLCHAIN_FILE}" -C /opt/riscv/${{ matrix.toolchain_arch }} --strip-components=1
+          fi
+
+      - name: Verify toolchain
+        run: |
+          export PATH="/opt/riscv/${{ matrix.toolchain_arch }}/bin:$PATH"
+          ${{ matrix.cross_compile }}gcc --version
+
+      - name: Build libgdbstub
+        run: make
+
+      - name: Build emulator (${{ matrix.arch }})
+        run: |
+          export PATH="/opt/riscv/${{ matrix.toolchain_arch }}/bin:$PATH"
+          make build-emu ARCH=${{ matrix.arch }} CROSS_COMPILE=${{ matrix.cross_compile }}
+
+      - name: Run continue test
+        run: |
+          export PATH="/opt/riscv/${{ matrix.toolchain_arch }}/bin:$PATH"
+          export CROSS_COMPILE=${{ matrix.cross_compile }}
+          ARCH=${{ matrix.arch }} .ci/gdbstub_cont_test.sh
+
+      - name: Run breakpoint test
+        run: |
+          export PATH="/opt/riscv/${{ matrix.toolchain_arch }}/bin:$PATH"
+          export CROSS_COMPILE=${{ matrix.cross_compile }}
+          ARCH=${{ matrix.arch }} .ci/gdbstub_bp_test.sh
+
+      - name: Test Summary
+        if: always()
+        run: |
+          echo "## Test Results for ${{ matrix.arch }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Test | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Continue Test | ${{ job.status == 'success' && 'PASSED' || 'FAILED' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Breakpoint Test | ${{ job.status == 'success' && 'PASSED' || 'FAILED' }} |" >> $GITHUB_STEP_SUMMARY
+
+  # Summary job that depends on all test jobs
+  test-summary:
+    name: Test Summary
+    runs-on: ubuntu-latest
+    needs: [build-and-test]
+    if: always()
+    steps:
+      - name: Check test results
+        run: |
+          echo "## Overall Test Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [[ "${{ needs.build-and-test.result }}" == "success" ]]; then
+            echo "All architecture tests passed!" >> $GITHUB_STEP_SUMMARY
+            exit 0
+          else
+            echo "Some tests failed. See individual job logs for details." >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi
