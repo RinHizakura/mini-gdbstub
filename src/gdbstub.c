@@ -1,5 +1,5 @@
 #include "gdbstub.h"
-#include <assert.h>
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -10,6 +10,12 @@
 #include "regbuf.h"
 #include "utils/csum.h"
 #include "utils/translate.h"
+
+/* Maximum memory operation size to prevent DoS via huge allocations */
+#define MAX_MEM_XFER_SIZE (MAX_DATA_PAYLOAD / 2)
+
+/* Maximum SMP count for thread info formatting */
+#define MAX_SMP_COUNT 10000
 
 struct gdbstub_private {
     conn_t conn;
@@ -79,18 +85,18 @@ static void *socket_reader(gdbstub_t *gdbstub)
 bool gdbstub_init(gdbstub_t *gdbstub,
                   struct target_ops *ops,
                   arch_info_t arch,
-                  char *s)
+                  const char *s)
 {
     char *addr_str = NULL;
 
-    if (s == NULL || ops == NULL)
+    if (!s || !ops)
         return false;
 
     memset(gdbstub, 0, sizeof(gdbstub_t));
     gdbstub->ops = ops;
     gdbstub->arch = arch;
     gdbstub->priv = calloc(1, sizeof(struct gdbstub_private));
-    if (gdbstub->priv == NULL)
+    if (!gdbstub->priv)
         return false;
 
     /* Precompute total register storage size (register sizes are constant) */
@@ -98,12 +104,13 @@ bool gdbstub_init(gdbstub_t *gdbstub,
     for (int i = 0; i < arch.reg_num; i++)
         gdbstub->priv->total_reg_bytes += ops->get_reg_bytes(i);
 
-    // This is a naive implementation to parse the string
+    /* Parse address string - check strdup result immediately */
     addr_str = strdup(s);
+    if (!addr_str)
+        goto priv_fail;
+
     char *port_str = strchr(addr_str, ':');
     int port = 0;
-    if (addr_str == NULL)
-        goto addr_fail;
 
     if (port_str != NULL) {
         *port_str = '\0';
@@ -126,12 +133,17 @@ conn_fail:
     regbuf_destroy(&gdbstub->priv->regbuf);
 addr_fail:
     free(addr_str);
+priv_fail:
+    free(gdbstub->priv);
+    gdbstub->priv = NULL;
     return false;
 }
 
 #define SEND_ERR(gdbstub, err) conn_send_pktstr(&gdbstub->priv->conn, err)
 #define SEND_EPERM(gdbstub) SEND_ERR(gdbstub, "E01")
-#define SEND_EINVAL(gdbstub) SEND_ERR(gdbstub, "E22")
+#define SEND_EFAULT(gdbstub) SEND_ERR(gdbstub, "E0e")
+#define SEND_EINVAL(gdbstub) SEND_ERR(gdbstub, "E16")
+#define SEND_ENOMEM(gdbstub) SEND_ERR(gdbstub, "E0c")
 
 static gdb_event_t process_cont(gdbstub_t *gdbstub)
 {
@@ -160,10 +172,22 @@ static gdb_event_t process_stepi(gdbstub_t *gdbstub)
 static void process_reg_read(gdbstub_t *gdbstub, void *args)
 {
     char packet_str[MAX_SEND_PACKET_SIZE];
+    size_t offset = 0;
 
     for (int i = 0; i < gdbstub->arch.reg_num; i++) {
         size_t reg_sz = gdbstub->ops->get_reg_bytes(i);
+
+        /* Check for buffer overflow before writing */
+        if (offset + reg_sz * 2 >= MAX_SEND_PACKET_SIZE) {
+            SEND_ENOMEM(gdbstub);
+            return;
+        }
+
         void *reg_value = regbuf_get(&gdbstub->priv->regbuf, reg_sz);
+        if (!reg_value) {
+            SEND_ENOMEM(gdbstub);
+            return;
+        }
 
         int ret = gdbstub->ops->read_reg(args, i, reg_value);
 #ifdef DEBUG
@@ -173,14 +197,16 @@ static void process_reg_read(gdbstub_t *gdbstub, void *args)
                reg_sz);
 #endif
         if (!ret) {
-            hex_to_str((uint8_t *) reg_value, &packet_str[i * reg_sz * 2],
-                       reg_sz);
+            hex_to_str((uint8_t *) reg_value, &packet_str[offset], reg_sz);
+            offset += reg_sz * 2;
         } else {
-            sprintf(packet_str, "E%d", ret);
-            break;
+            snprintf(packet_str, sizeof(packet_str), "E%02x", ret & 0xff);
+            conn_send_pktstr(&gdbstub->priv->conn, packet_str);
+            return;
         }
     }
 
+    packet_str[offset] = '\0';
     conn_send_pktstr(&gdbstub->priv->conn, packet_str);
 }
 
@@ -189,9 +215,23 @@ static void process_reg_read_one(gdbstub_t *gdbstub, char *payload, void *args)
     char packet_str[MAX_SEND_PACKET_SIZE];
     int regno;
 
-    assert(sscanf(payload, "%x", &regno) == 1);
+    if (sscanf(payload, "%x", &regno) != 1) {
+        SEND_EINVAL(gdbstub);
+        return;
+    }
+
+    /* Validate register number */
+    if (regno < 0 || regno >= gdbstub->arch.reg_num) {
+        SEND_EINVAL(gdbstub);
+        return;
+    }
+
     size_t reg_sz = gdbstub->ops->get_reg_bytes(regno);
     void *reg_value = regbuf_get(&gdbstub->priv->regbuf, reg_sz);
+    if (!reg_value) {
+        SEND_ENOMEM(gdbstub);
+        return;
+    }
 
     int ret = gdbstub->ops->read_reg(args, regno, reg_value);
 #ifdef DEBUG
@@ -203,7 +243,7 @@ static void process_reg_read_one(gdbstub_t *gdbstub, char *payload, void *args)
     if (!ret) {
         hex_to_str((uint8_t *) reg_value, packet_str, reg_sz);
     } else {
-        sprintf(packet_str, "E%d", ret);
+        snprintf(packet_str, sizeof(packet_str), "E%02x", ret & 0xff);
     }
     conn_send_pktstr(&gdbstub->priv->conn, packet_str);
 }
@@ -256,7 +296,7 @@ static void process_reg_write(gdbstub_t *gdbstub, char *payload, void *args)
             free(new_values);
             free(backup_values);
             char packet_str[16];
-            sprintf(packet_str, "E%d", ret);
+            snprintf(packet_str, sizeof(packet_str), "E%02x", ret & 0xff);
             conn_send_pktstr(&gdbstub->priv->conn, packet_str);
             return;
         }
@@ -313,16 +353,38 @@ static void process_reg_write_one(gdbstub_t *gdbstub, char *payload, void *args)
     int regno;
     char *regno_str = payload;
     char *data_str = strchr(payload, '=');
-    if (data_str) {
-        *data_str = '\0';
-        data_str++;
+
+    if (!data_str) {
+        SEND_EINVAL(gdbstub);
+        return;
     }
 
-    assert(sscanf(regno_str, "%x", &regno) == 1);
+    *data_str = '\0';
+    data_str++;
+
+    if (sscanf(regno_str, "%x", &regno) != 1) {
+        SEND_EINVAL(gdbstub);
+        return;
+    }
+
+    /* Validate register number */
+    if (regno < 0 || regno >= gdbstub->arch.reg_num) {
+        SEND_EINVAL(gdbstub);
+        return;
+    }
+
     size_t reg_sz = gdbstub->ops->get_reg_bytes(regno);
     void *data = regbuf_get(&gdbstub->priv->regbuf, reg_sz);
+    if (!data) {
+        SEND_ENOMEM(gdbstub);
+        return;
+    }
 
-    assert(strlen(data_str) == reg_sz * 2);
+    /* Validate data string length */
+    if (strlen(data_str) != reg_sz * 2) {
+        SEND_EINVAL(gdbstub);
+        return;
+    }
 
     str_to_hex(data_str, (uint8_t *) data, reg_sz);
 #ifdef DEBUG
@@ -335,8 +397,8 @@ static void process_reg_write_one(gdbstub_t *gdbstub, char *payload, void *args)
     if (!ret) {
         conn_send_pktstr(&gdbstub->priv->conn, "OK");
     } else {
-        char packet_str[MAX_SEND_PACKET_SIZE];
-        sprintf(packet_str, "E%d", ret);
+        char packet_str[16];
+        snprintf(packet_str, sizeof(packet_str), "E%02x", ret & 0xff);
         conn_send_pktstr(&gdbstub->priv->conn, packet_str);
     }
 }
@@ -344,18 +406,34 @@ static void process_reg_write_one(gdbstub_t *gdbstub, char *payload, void *args)
 static void process_mem_read(gdbstub_t *gdbstub, char *payload, void *args)
 {
     size_t maddr, mlen;
-    assert(sscanf(payload, "%lx,%lx", &maddr, &mlen) == 2);
+
+    if (sscanf(payload, "%zx,%zx", &maddr, &mlen) != 2) {
+        SEND_EINVAL(gdbstub);
+        return;
+    }
+
+    /* Enforce size limit to prevent DoS */
+    if (mlen > MAX_MEM_XFER_SIZE || mlen == 0) {
+        SEND_EINVAL(gdbstub);
+        return;
+    }
+
 #ifdef DEBUG
-    printf("mem read = addr %lx / len %lx\n", maddr, mlen);
+    printf("mem read = addr %zx / len %zx\n", maddr, mlen);
 #endif
     char packet_str[MAX_SEND_PACKET_SIZE];
 
     uint8_t *mval = malloc(mlen);
+    if (!mval) {
+        SEND_ENOMEM(gdbstub);
+        return;
+    }
+
     int ret = gdbstub->ops->read_mem(args, maddr, mlen, mval);
     if (!ret) {
         hex_to_str(mval, packet_str, mlen);
     } else {
-        sprintf(packet_str, "E%d", ret);
+        snprintf(packet_str, sizeof(packet_str), "E%02x", ret & 0xff);
     }
     conn_send_pktstr(&gdbstub->priv->conn, packet_str);
     free(mval);
@@ -365,24 +443,50 @@ static void process_mem_write(gdbstub_t *gdbstub, char *payload, void *args)
 {
     size_t maddr, mlen;
     char *content = strchr(payload, ':');
-    if (content) {
-        *content = '\0';
-        content++;
+
+    if (!content) {
+        SEND_EINVAL(gdbstub);
+        return;
     }
-    assert(sscanf(payload, "%lx,%lx", &maddr, &mlen) == 2);
+
+    *content = '\0';
+    content++;
+
+    if (sscanf(payload, "%zx,%zx", &maddr, &mlen) != 2) {
+        SEND_EINVAL(gdbstub);
+        return;
+    }
+
+    /* Enforce size limit to prevent DoS */
+    if (mlen > MAX_MEM_XFER_SIZE || mlen == 0) {
+        SEND_EINVAL(gdbstub);
+        return;
+    }
+
+    /* Validate content length matches mlen */
+    if (strlen(content) != mlen * 2) {
+        SEND_EINVAL(gdbstub);
+        return;
+    }
+
 #ifdef DEBUG
-    printf("mem write = addr %lx / len %lx\n", maddr, mlen);
+    printf("mem write = addr %zx / len %zx\n", maddr, mlen);
     printf("mem write = content %s\n", content);
 #endif
     uint8_t *mval = malloc(mlen);
+    if (!mval) {
+        SEND_ENOMEM(gdbstub);
+        return;
+    }
+
     str_to_hex(content, mval, mlen);
     int ret = gdbstub->ops->write_mem(args, maddr, mlen, mval);
 
     if (!ret) {
         conn_send_pktstr(&gdbstub->priv->conn, "OK");
     } else {
-        char packet_str[MAX_SEND_PACKET_SIZE];
-        sprintf(packet_str, "E%d", ret);
+        char packet_str[16];
+        snprintf(packet_str, sizeof(packet_str), "E%02x", ret & 0xff);
         conn_send_pktstr(&gdbstub->priv->conn, packet_str);
     }
     free(mval);
@@ -395,54 +499,109 @@ static void process_mem_xwrite(gdbstub_t *gdbstub,
 {
     size_t maddr, mlen;
     char *content = strchr(payload, ':');
-    if (content) {
-        *content = '\0';
-        content++;
+
+    if (!content) {
+        SEND_EINVAL(gdbstub);
+        return;
     }
-    assert(sscanf(payload, "%lx,%lx", &maddr, &mlen) == 2);
-    assert(unescape(content, (char *) packet_end) == (int) mlen);
+
+    *content = '\0';
+    content++;
+
+    if (sscanf(payload, "%zx,%zx", &maddr, &mlen) != 2) {
+        SEND_EINVAL(gdbstub);
+        return;
+    }
+
+    /* Enforce size limit to prevent DoS */
+    if (mlen > MAX_MEM_XFER_SIZE) {
+        SEND_EINVAL(gdbstub);
+        return;
+    }
+
+    int unescaped_len = unescape(content, (char *) packet_end);
+    if (unescaped_len != (int) mlen) {
+        SEND_EINVAL(gdbstub);
+        return;
+    }
+
 #ifdef DEBUG
-    printf("mem xwrite = addr %lx / len %lx\n", maddr, mlen);
+    printf("mem xwrite = addr %zx / len %zx\n", maddr, mlen);
     for (size_t i = 0; i < mlen; i++) {
-        printf("\tmem xwrite, byte %ld: %x\n", i, content[i]);
+        printf("\tmem xwrite, byte %zu: %x\n", i, (unsigned char) content[i]);
     }
 #endif
 
-    gdbstub->ops->write_mem(args, maddr, mlen, content);
-    conn_send_pktstr(&gdbstub->priv->conn, "OK");
+    int ret = gdbstub->ops->write_mem(args, maddr, mlen, content);
+    if (!ret) {
+        conn_send_pktstr(&gdbstub->priv->conn, "OK");
+    } else {
+        char packet_str[16];
+        snprintf(packet_str, sizeof(packet_str), "E%02x", ret & 0xff);
+        conn_send_pktstr(&gdbstub->priv->conn, packet_str);
+    }
 }
 
 
-void process_xfer(gdbstub_t *gdbstub, char *s)
+static void process_xfer(gdbstub_t *gdbstub, char *s)
 {
     char *name = s;
-    char *args = strchr(s, ':');
-    if (args) {
-        *args = '\0';
-        args++;
+    char *xfer_args = strchr(s, ':');
+    if (xfer_args) {
+        *xfer_args = '\0';
+        xfer_args++;
     }
 #ifdef DEBUG
-    printf("xfer = %s %s\n", name, args);
+    printf("xfer = %s %s\n", name, xfer_args);
 #endif
     if (!strcmp(name, "features") && gdbstub->arch.target_desc != NULL) {
-        /* Check the args */
-        char *action = strtok(args, ":");
-        assert(strcmp(action, "read") == 0);
-        char *annex = strtok(NULL, ":");
-        assert(strcmp(annex, "target.xml") == 0);
+        /* Parse: read:target.xml:offset,length */
+        char *action = strtok(xfer_args, ":");
+        if (!action || strcmp(action, "read")) {
+            conn_send_pktstr(&gdbstub->priv->conn, "");
+            return;
+        }
 
-        char buf[MAX_SEND_PACKET_SIZE];
+        char *annex = strtok(NULL, ":");
+        if (!annex || strcmp(annex, "target.xml")) {
+            conn_send_pktstr(&gdbstub->priv->conn, "");
+            return;
+        }
+
+        char *offset_str = strtok(NULL, ":");
+        if (!offset_str) {
+            conn_send_pktstr(&gdbstub->priv->conn, "");
+            return;
+        }
+
         int offset = 0, length = 0;
-        sscanf(strtok(NULL, ":"), "%x,%x", &offset, &length);
+        if (sscanf(offset_str, "%x,%x", &offset, &length) != 2) {
+            conn_send_pktstr(&gdbstub->priv->conn, "");
+            return;
+        }
 
         int total_len = strlen(gdbstub->arch.target_desc);
-        int payload_length =
-            MAX_DATA_PAYLOAD > length ? length : MAX_DATA_PAYLOAD;
 
-        // Determine if the remaining data fits within the buffer
-        buf[0] = (total_len - offset < payload_length) ? 'l' : 'm';
-        snprintf(buf + 1, payload_length, "%s",
-                 gdbstub->arch.target_desc + offset);
+        /* Validate offset */
+        if (offset < 0 || offset >= total_len) {
+            conn_send_pktstr(&gdbstub->priv->conn, "l");
+            return;
+        }
+
+        /* Clamp length to remaining bytes and buffer size */
+        int remaining = total_len - offset;
+        int max_payload = MAX_SEND_PACKET_SIZE - 2; /* Reserve for 'l'/'m' + NUL
+                                                     */
+        int payload_length = length;
+        if (payload_length > remaining)
+            payload_length = remaining;
+        if (payload_length > max_payload)
+            payload_length = max_payload;
+
+        char buf[MAX_SEND_PACKET_SIZE];
+        buf[0] = (remaining <= payload_length) ? 'l' : 'm';
+        memcpy(buf + 1, gdbstub->arch.target_desc + offset, payload_length);
+        buf[payload_length + 1] = '\0';
 
         conn_send_pktstr(&gdbstub->priv->conn, buf);
     } else {
@@ -466,16 +625,24 @@ static void process_query(gdbstub_t *gdbstub, char *payload, void *args)
     if (!strcmp(name, "C")) {
         if (gdbstub->ops->get_cpu != NULL) {
             int cpuid = gdbstub->ops->get_cpu(args);
-            sprintf(packet_str, "QC%04d", cpuid);
+            snprintf(packet_str, sizeof(packet_str), "QC%04d", cpuid);
             conn_send_pktstr(&gdbstub->priv->conn, packet_str);
         } else
             conn_send_pktstr(&gdbstub->priv->conn, "");
     } else if (!strcmp(name, "Supported")) {
+        /* Advertise supported features:
+         * - PacketSize: max packet size
+         * - qXfer:features:read+: target description XML support
+         * - hwbreak+: hardware breakpoint support (Z1 packets)
+         * - swbreak+: software breakpoint support (Z0 packets)
+         */
         if (gdbstub->arch.target_desc != NULL)
-            conn_send_pktstr(&gdbstub->priv->conn,
-                             "PacketSize=1024;qXfer:features:read+");
+            conn_send_pktstr(
+                &gdbstub->priv->conn,
+                "PacketSize=1024;qXfer:features:read+;hwbreak+;swbreak+");
         else
-            conn_send_pktstr(&gdbstub->priv->conn, "PacketSize=1024");
+            conn_send_pktstr(&gdbstub->priv->conn,
+                             "PacketSize=1024;hwbreak+;swbreak+");
     } else if (!strcmp(name, "Attached")) {
         /* assume attached to an existing process */
         conn_send_pktstr(&gdbstub->priv->conn, "1");
@@ -484,20 +651,21 @@ static void process_query(gdbstub_t *gdbstub, char *payload, void *args)
     } else if (!strcmp(name, "Symbol")) {
         conn_send_pktstr(&gdbstub->priv->conn, "OK");
     } else if (!strcmp(name, "fThreadInfo")) {
-        /* Assume at least 1 CPU if user didn't specific
-         * the CPU counts */
+        /* Assume at least 1 CPU if user didn't specific the CPU counts */
         int smp = gdbstub->arch.smp ? gdbstub->arch.smp : 1;
+
+        /* Enforce SMP limit to prevent buffer overflow */
+        if (smp >= MAX_SMP_COUNT) {
+            smp = MAX_SMP_COUNT - 1;
+        }
+
         char *ptr;
         char cpuid_str[6];
-
-        /* Make assumption on the CPU counts, so
-         * that we can use the buffer very simply. */
-        assert(smp < 10000);
 
         packet_str[0] = 'm';
         ptr = packet_str + 1;
         for (int cpuid = 0; cpuid < smp; cpuid++) {
-            sprintf(cpuid_str, "%04d,", cpuid);
+            snprintf(cpuid_str, sizeof(cpuid_str), "%04d,", cpuid);
             memcpy(ptr, cpuid_str, 5);
             ptr += 5;
         }
@@ -524,6 +692,12 @@ static void process_query(gdbstub_t *gdbstub, char *payload, void *args)
 static inline gdb_event_t process_vcont(gdbstub_t *gdbstub, char *args)
 {
     gdb_event_t event = EVENT_NONE;
+
+    /* Handle NULL or empty args */
+    if (!args || !args[0]) {
+        SEND_EINVAL(gdbstub);
+        return EVENT_NONE;
+    }
 
     switch (args[0]) {
     case 'c':
@@ -566,9 +740,9 @@ static inline void process_vcont_support(gdbstub_t *gdbstub)
 {
     char packet_str[MAX_SEND_PACKET_SIZE];
     /* Only advertise 'c' and 's' (no signal support for hardware emulation) */
-    char *str_s = (gdbstub->ops->stepi == NULL) ? "" : "s;";
-    char *str_c = (gdbstub->ops->cont == NULL) ? "" : "c;";
-    sprintf(packet_str, VCONT_DESC, str_s, str_c);
+    const char *str_s = (gdbstub->ops->stepi == NULL) ? "" : "s;";
+    const char *str_c = (gdbstub->ops->cont == NULL) ? "" : "c;";
+    snprintf(packet_str, sizeof(packet_str), VCONT_DESC, str_s, str_c);
 
     conn_send_pktstr(&gdbstub->priv->conn, packet_str);
 }
@@ -601,13 +775,24 @@ static void process_del_break_points(gdbstub_t *gdbstub,
                                      void *args)
 {
     size_t type, addr, kind;
-    assert(sscanf(payload, "%zx,%zx,%zx", &type, &addr, &kind) == 3);
+
+    if (sscanf(payload, "%zx,%zx,%zx", &type, &addr, &kind) != 3) {
+        SEND_EINVAL(gdbstub);
+        return;
+    }
+
+    /* Validate breakpoint type */
+    if (type > WP_ACCESS) {
+        SEND_EINVAL(gdbstub);
+        return;
+    }
 
 #ifdef DEBUG
-    printf("remove breakpoints = %zx %zx %zx\n", type, addr, kind);
+    printf("remove breakpoints = type %zx addr %zx kind %zx\n", type, addr,
+           kind);
 #endif
 
-    bool ret = gdbstub->ops->del_bp(args, addr, type);
+    bool ret = gdbstub->ops->del_bp(args, addr, kind, type);
     if (ret)
         conn_send_pktstr(&gdbstub->priv->conn, "OK");
     else
@@ -619,13 +804,23 @@ static void process_set_break_points(gdbstub_t *gdbstub,
                                      void *args)
 {
     size_t type, addr, kind;
-    assert(sscanf(payload, "%zx,%zx,%zx", &type, &addr, &kind) == 3);
+
+    if (sscanf(payload, "%zx,%zx,%zx", &type, &addr, &kind) != 3) {
+        SEND_EINVAL(gdbstub);
+        return;
+    }
+
+    /* Validate breakpoint type */
+    if (type > WP_ACCESS) {
+        SEND_EINVAL(gdbstub);
+        return;
+    }
 
 #ifdef DEBUG
-    printf("set breakpoints = %zx %zx %zx\n", type, addr, kind);
+    printf("set breakpoints = type %zx addr %zx kind %zx\n", type, addr, kind);
 #endif
 
-    bool ret = gdbstub->ops->set_bp(args, addr, type);
+    bool ret = gdbstub->ops->set_bp(args, addr, kind, type);
     if (ret)
         conn_send_pktstr(&gdbstub->priv->conn, "OK");
     else
@@ -638,7 +833,10 @@ static void process_set_cpu(gdbstub_t *gdbstub, char *payload, void *args)
     /* We don't support deprecated Hc packet, GDB
      * should send only send vCont;c and vCont;s here. */
     if (payload[0] == 'g') {
-        assert(sscanf(payload, "g%d", &cpuid) == 1);
+        if (sscanf(payload, "g%d", &cpuid) != 1) {
+            SEND_EINVAL(gdbstub);
+            return;
+        }
         gdbstub->ops->set_cpu(args, cpuid);
     }
     conn_send_pktstr(&gdbstub->priv->conn, "OK");
@@ -664,8 +862,17 @@ static gdb_event_t gdbstub_process_packet(gdbstub_t *gdbstub,
                                           packet_t *inpkt,
                                           void *args)
 {
-    assert(inpkt->data[0] == '$');
-    assert(packet_csum_verify(inpkt));
+    /* Validate packet framing */
+    if (inpkt->data[0] != '$')
+        return EVENT_NONE;
+
+    /* Validate checksum - reject packet on failure instead of crashing */
+    if (!packet_csum_verify(inpkt)) {
+#ifdef DEBUG
+        printf("checksum verification failed\n");
+#endif
+        return EVENT_NONE;
+    }
 
     /* After checking the checksum result, ignore those bytes */
     inpkt->data[inpkt->end_pos - CSUM_SIZE] = 0;
@@ -807,25 +1014,34 @@ static gdb_action_t gdbstub_handle_event(gdbstub_t *gdbstub,
 static void gdbstub_act_resume(gdbstub_t *gdbstub)
 {
     char packet_str[32];
-    sprintf(packet_str, "S%02x", GDB_SIGNAL_TRAP);
+    snprintf(packet_str, sizeof(packet_str), "S%02x", GDB_SIGNAL_TRAP);
     conn_send_pktstr(&gdbstub->priv->conn, packet_str);
 }
 
 bool gdbstub_run(gdbstub_t *gdbstub, void *args)
 {
-    // Bring the user-provided argument in the gdbstub_t structure
+    /* Bring the user-provided argument in the gdbstub_t structure */
     gdbstub->priv->args = args;
 
     /* Create a thread to receive interrupt when running the gdbstub op */
     if (gdbstub->ops->on_interrupt != NULL && gdbstub->priv->tid == 0) {
         async_io_disable(gdbstub->priv);
-        pthread_create(&gdbstub->priv->tid, NULL, (void *) socket_reader,
-                       (void *) gdbstub);
+        int ret = pthread_create(&gdbstub->priv->tid, NULL,
+                                 (void *) socket_reader, (void *) gdbstub);
+        if (ret != 0) {
+            perror("pthread_create failed");
+            return false;
+        }
     }
 
     while (true) {
         conn_recv_packet(&gdbstub->priv->conn);
         packet_t *pkt = conn_pop_packet(&gdbstub->priv->conn);
+
+        /* Handle NULL packet (connection error) */
+        if (!pkt)
+            return false;
+
 #ifdef DEBUG
         printf("packet = %s\n", pkt->data);
 #endif
