@@ -18,6 +18,9 @@ struct gdbstub_private {
     pthread_t tid;
     bool async_io_enable;
     void *args;
+
+    /* Cached register size totals (computed once at init) */
+    size_t total_reg_bytes;
 };
 
 static inline void async_io_enable(struct gdbstub_private *priv)
@@ -89,6 +92,11 @@ bool gdbstub_init(gdbstub_t *gdbstub,
     gdbstub->priv = calloc(1, sizeof(struct gdbstub_private));
     if (gdbstub->priv == NULL)
         return false;
+
+    /* Precompute total register storage size (register sizes are constant) */
+    gdbstub->priv->total_reg_bytes = 0;
+    for (int i = 0; i < arch.reg_num; i++)
+        gdbstub->priv->total_reg_bytes += ops->get_reg_bytes(i);
 
     // This is a naive implementation to parse the string
     addr_str = strdup(s);
@@ -202,29 +210,101 @@ static void process_reg_read_one(gdbstub_t *gdbstub, char *payload, void *args)
 
 static void process_reg_write(gdbstub_t *gdbstub, char *payload, void *args)
 {
-    for (int i = 0; i < gdbstub->arch.reg_num; i++) {
-        size_t reg_sz = gdbstub->ops->get_reg_bytes(i);
-        void *reg_value = regbuf_get(&gdbstub->priv->regbuf, reg_sz);
+    int reg_num = gdbstub->arch.reg_num;
 
-        str_to_hex(&payload[i * reg_sz * 2], (uint8_t *) reg_value, reg_sz);
-#ifdef DEBUG
-        char debug_hex[MAX_SEND_PACKET_SIZE];
-        hex_to_str((uint8_t *) reg_value, debug_hex, reg_sz);
-        printf("reg write = regno %d data 0x%s (size %zu)\n", i, debug_hex,
-               reg_sz);
-#endif
-        int ret = gdbstub->ops->write_reg(args, i, reg_value);
+    /* Use cached total_reg_bytes computed at init time */
+    size_t total_reg_bytes = gdbstub->priv->total_reg_bytes;
+    size_t expected_hex_len = total_reg_bytes * 2;
+
+    if (total_reg_bytes == 0) {
+        conn_send_pktstr(&gdbstub->priv->conn, "OK");
+        return;
+    }
+
+    /* Validate payload length matches expected register count */
+    size_t payload_len = strlen(payload);
+    if (payload_len != expected_hex_len) {
+        conn_send_pktstr(&gdbstub->priv->conn, "E22"); /* EINVAL */
+        return;
+    }
+
+    /* Allocate storage for new values and backup (for rollback) */
+    uint8_t *new_values = malloc(total_reg_bytes);
+    uint8_t *backup_values = malloc(total_reg_bytes);
+    if (!new_values || !backup_values) {
+        free(new_values);
+        free(backup_values);
+        conn_send_pktstr(&gdbstub->priv->conn, "E12"); /* ENOMEM */
+        return;
+    }
+
+    /* Parse all new values and save current values for rollback */
+    size_t payload_offset = 0;
+    size_t storage_offset = 0;
+    for (int i = 0; i < reg_num; i++) {
+        size_t reg_sz = gdbstub->ops->get_reg_bytes(i);
+
+        /* Parse new value from payload */
+        str_to_hex(&payload[payload_offset], &new_values[storage_offset],
+                   reg_sz);
+
+        /* Save current value for potential rollback */
+        int ret =
+            gdbstub->ops->read_reg(args, i, &backup_values[storage_offset]);
         if (ret) {
-            /* FIXME: Even if we fail to modify this register, some
-             * registers could be writen before. This may not be
-             * an expected behavior. */
-            char packet_str[MAX_SEND_PACKET_SIZE];
+            /* Cannot read current state; abort without modifying */
+            free(new_values);
+            free(backup_values);
+            char packet_str[16];
             sprintf(packet_str, "E%d", ret);
             conn_send_pktstr(&gdbstub->priv->conn, packet_str);
             return;
         }
+
+#ifdef DEBUG
+        char debug_hex[MAX_SEND_PACKET_SIZE];
+        hex_to_str(&new_values[storage_offset], debug_hex, reg_sz);
+        printf("reg write = regno %d data 0x%s (size %zu)\n", i, debug_hex,
+               reg_sz);
+#endif
+        payload_offset += reg_sz * 2;
+        storage_offset += reg_sz;
     }
 
+    /* Commit all registers atomically */
+    storage_offset = 0;
+    int failed_regno = -1;
+    int error_code = 0;
+    for (int i = 0; i < reg_num; i++) {
+        size_t reg_sz = gdbstub->ops->get_reg_bytes(i);
+        int ret = gdbstub->ops->write_reg(args, i, &new_values[storage_offset]);
+        if (ret) {
+            failed_regno = i;
+            error_code = ret;
+            break;
+        }
+        storage_offset += reg_sz;
+    }
+
+    /* Rollback on failure */
+    if (failed_regno >= 0) {
+        /* Restore all registers written before the failure */
+        storage_offset = 0;
+        for (int i = 0; i < failed_regno; i++) {
+            size_t reg_sz = gdbstub->ops->get_reg_bytes(i);
+            gdbstub->ops->write_reg(args, i, &backup_values[storage_offset]);
+            storage_offset += reg_sz;
+        }
+        free(new_values);
+        free(backup_values);
+        char packet_str[16];
+        sprintf(packet_str, "E%d", error_code);
+        conn_send_pktstr(&gdbstub->priv->conn, packet_str);
+        return;
+    }
+
+    free(new_values);
+    free(backup_values);
     conn_send_pktstr(&gdbstub->priv->conn, "OK");
 }
 

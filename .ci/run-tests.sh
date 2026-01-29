@@ -149,6 +149,30 @@ run_arch_tests()
         ((failed++))
     fi
 
+    # Run single register write test
+    print_step "Running single register write test..."
+    if ARCH="$arch" "$SCRIPT_DIR/gdbstub_regwrite_single_test.sh"; then
+        ((passed++))
+    else
+        ((failed++))
+    fi
+
+    # Run bulk register reject test
+    print_step "Running bulk register reject test..."
+    if ARCH="$arch" "$SCRIPT_DIR/gdbstub_regwrite_bulk_reject_test.sh"; then
+        ((passed++))
+    else
+        ((failed++))
+    fi
+
+    # Run bulk register roundtrip test
+    print_step "Running bulk register roundtrip test..."
+    if ARCH="$arch" "$SCRIPT_DIR/gdbstub_regwrite_bulk_roundtrip_test.sh"; then
+        ((passed++))
+    else
+        ((failed++))
+    fi
+
     echo ""
     print_info "$arch Results: $passed passed, $failed failed"
 
