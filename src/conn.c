@@ -36,6 +36,10 @@ bool conn_init(conn_t *conn, char *addr_str, int port)
     if (!pktbuf_init(&conn->pktbuf))
         return false;
 
+    /* Initialize protocol state */
+    conn->no_ack_mode = false;
+    conn->failure_count = 0;
+
     struct in_addr addr_ip;
     if (inet_aton(addr_str, &addr_ip) != 0) {
         struct sockaddr_in addr;
@@ -97,11 +101,10 @@ void conn_recv_packet(conn_t *conn)
     while (!pktbuf_is_complete(&conn->pktbuf) &&
            socket_readable(conn->socket_fd, -1)) {
         ssize_t nread = pktbuf_fill_from_file(&conn->pktbuf, conn->socket_fd);
-        if (nread == -1)
-            break;
+        if (nread <= 0)
+            break; /* EOF (0) or error (-1) */
     }
-
-    conn_send_str(conn, STR_ACK);
+    /* ACK/NACK is now sent by gdbstub_run() after checksum verification */
 }
 
 packet_t *conn_pop_packet(conn_t *conn)
