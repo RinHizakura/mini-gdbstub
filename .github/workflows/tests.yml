@@ -119,6 +119,22 @@ jobs:
           export CROSS_COMPILE=${{ matrix.cross_compile }}
           ARCH=${{ matrix.arch }} .ci/gdbstub_regwrite_bulk_roundtrip_test.sh
 
+      - name: Run no-ack mode test
+        id: test-noack
+        continue-on-error: true
+        run: |
+          export PATH="/opt/riscv/${{ matrix.toolchain_arch }}/bin:$PATH"
+          export CROSS_COMPILE=${{ matrix.cross_compile }}
+          ARCH=${{ matrix.arch }} .ci/gdbstub_noack_test.sh
+
+      - name: Run detach test
+        id: test-detach
+        continue-on-error: true
+        run: |
+          export PATH="/opt/riscv/${{ matrix.toolchain_arch }}/bin:$PATH"
+          export CROSS_COMPILE=${{ matrix.cross_compile }}
+          ARCH=${{ matrix.arch }} .ci/gdbstub_detach_test.sh
+
       - name: Test Summary
         if: always()
         run: |
@@ -131,6 +147,8 @@ jobs:
           echo "| Single Register Write | ${{ steps.test-regwrite-single.outcome == 'success' && 'PASSED' || 'FAILED' }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Bulk Register Reject | ${{ steps.test-regwrite-bulk-reject.outcome == 'success' && 'PASSED' || 'FAILED' }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Bulk Register Roundtrip | ${{ steps.test-regwrite-bulk-roundtrip.outcome == 'success' && 'PASSED' || 'FAILED' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| No-Ack Mode | ${{ steps.test-noack.outcome == 'success' && 'PASSED' || 'FAILED' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Detach | ${{ steps.test-detach.outcome == 'success' && 'PASSED' || 'FAILED' }} |" >> $GITHUB_STEP_SUMMARY
 
       - name: Fail if any test failed
         if: always()
@@ -139,7 +157,9 @@ jobs:
              [[ "${{ steps.test-breakpoint.outcome }}" != "success" ]] || \
              [[ "${{ steps.test-regwrite-single.outcome }}" != "success" ]] || \
              [[ "${{ steps.test-regwrite-bulk-reject.outcome }}" != "success" ]] || \
-             [[ "${{ steps.test-regwrite-bulk-roundtrip.outcome }}" != "success" ]]; then
+             [[ "${{ steps.test-regwrite-bulk-roundtrip.outcome }}" != "success" ]] || \
+             [[ "${{ steps.test-noack.outcome }}" != "success" ]] || \
+             [[ "${{ steps.test-detach.outcome }}" != "success" ]]; then
             echo "One or more tests failed"
             exit 1
           fi

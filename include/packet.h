@@ -6,6 +6,7 @@
 #include <unistd.h>
 
 #define STR_ACK "+"
+#define STR_NACK "-"
 #define INTR_CHAR '\x03'
 
 #define CSUM_SIZE (2)

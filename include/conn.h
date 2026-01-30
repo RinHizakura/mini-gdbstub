@@ -8,11 +8,18 @@
 #define MAX_SEND_PACKET_SIZE (0x1000)
 #define MAX_DATA_PAYLOAD (MAX_SEND_PACKET_SIZE - (2 + CSUM_SIZE + 2))
 
+/* Maximum consecutive checksum failures before disconnecting */
+#define CONN_MAX_FAILURES 50
+
 typedef struct {
     int listen_fd;
     int socket_fd;
 
     pktbuf_t pktbuf;
+
+    /* Protocol state */
+    bool no_ack_mode;  /* true after QStartNoAckMode negotiation */
+    int failure_count; /* consecutive checksum/protocol failures */
 } conn_t;
 
 bool conn_init(conn_t *conn, char *addr_str, int port);
