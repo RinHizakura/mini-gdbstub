@@ -7,6 +7,7 @@ static void pktbuf_clear(pktbuf_t *pktbuf)
 {
     pktbuf->end_pos = -1;
     pktbuf->size = 0;
+    pktbuf->start = 0;
 }
 
 #define DEFAULT_CAP (10)
@@ -14,6 +15,7 @@ bool pktbuf_init(pktbuf_t *pktbuf)
 {
     pktbuf->cap = DEFAULT_CAP;
     pktbuf->data = calloc(1, (1 << pktbuf->cap) * sizeof(uint8_t));
+    pktbuf->start = 0;
     pktbuf_clear(pktbuf);
 
     return true;
@@ -46,7 +48,7 @@ bool pktbuf_is_complete(pktbuf_t *pktbuf)
 
     /* skip to the head of next packet */
     for (int i = 0; i < pktbuf->size; i++) {
-        if (pktbuf->data[i] == '$') {
+        if (pktbuf->data[pktbuf->start + i] == '$') {
             head = i;
             break;
         }
@@ -59,21 +61,23 @@ bool pktbuf_is_complete(pktbuf_t *pktbuf)
 
     if (head > 0) {
         /* moving memory for a valid packet */
-        memmove(pktbuf->data, pktbuf->data + head, pktbuf->size - head);
+        // memmove(pktbuf->data, pktbuf->data + head, pktbuf->size - head);
+        // pktbuf->size -= head;
+        pktbuf->start += head;
         pktbuf->size -= head;
     }
 
     /* check the end of the buffer */
-    uint8_t *end_pos_ptr = memchr(pktbuf->data, '#', pktbuf->size);
+    uint8_t *end_pos_ptr =
+        memchr(pktbuf->data + pktbuf->start, '#', pktbuf->size);
     if (end_pos_ptr == NULL)
         return false;
 
-    int end_pos = (end_pos_ptr - pktbuf->data) + CSUM_SIZE;
-    if (end_pos > pktbuf->size)
+    int end_pos = (end_pos_ptr - (pktbuf->data + pktbuf->start)) + CSUM_SIZE;
+    if (end_pos >= pktbuf->size)
         return false;
 
     pktbuf->end_pos = end_pos;
-
     return true;
 }
 
@@ -85,12 +89,11 @@ packet_t *pktbuf_pop_packet(pktbuf_t *pktbuf)
 
     int old_pkt_size = pktbuf->end_pos + 1;
     packet_t *pkt = calloc(1, sizeof(packet_t) + old_pkt_size + 1);
-    memcpy(pkt->data, pktbuf->data, old_pkt_size);
+    memcpy(pkt->data, pktbuf->data + pktbuf->start, old_pkt_size);
     pkt->end_pos = pktbuf->end_pos;
     pkt->data[old_pkt_size] = 0;
 
-    memmove(pktbuf->data, pktbuf->data + old_pkt_size + 1,
-            pktbuf->size - old_pkt_size);
+    pktbuf->start += old_pkt_size + 1;
     pktbuf->size -= old_pkt_size;
     pktbuf->end_pos = -1;
     return pkt;
