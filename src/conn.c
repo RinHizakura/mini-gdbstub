@@ -1,6 +1,7 @@
 #include "conn.h"
 #include <arpa/inet.h>
 #include <assert.h>
+#include <errno.h>
 #include <netinet/in.h>
 #include <poll.h>
 #include <stdio.h>
@@ -21,11 +22,6 @@ static bool socket_poll(int socket_fd, int timeout, int events)
     return (poll(&pfd, 1, timeout) > 0) && (pfd.revents & events);
 }
 
-static bool socket_readable(int socket_fd, int timeout)
-{
-    return socket_poll(socket_fd, timeout, POLLIN);
-}
-
 static bool socket_writable(int socket_fd, int timeout)
 {
     return socket_poll(socket_fd, timeout, POLLOUT);
@@ -33,7 +29,7 @@ static bool socket_writable(int socket_fd, int timeout)
 
 bool conn_init(conn_t *conn, char *addr_str, int port)
 {
-    if (!pktbuf_init(&conn->pktbuf))
+    if (pthread_mutex_init(&conn->send_mutex, NULL) != 0)
         return false;
 
     struct in_addr addr_ip;
@@ -44,7 +40,7 @@ bool conn_init(conn_t *conn, char *addr_str, int port)
         addr.sin_port = htons(port);
         conn->listen_fd = socket(AF_INET, SOCK_STREAM, 0);
         if (conn->listen_fd < 0)
-            return false;
+            goto mutex_fail;
 
         int optval = 1;
         if (setsockopt(conn->listen_fd, SOL_SOCKET, SO_REUSEADDR, &optval,
@@ -60,12 +56,13 @@ bool conn_init(conn_t *conn, char *addr_str, int port)
         }
     } else {
         struct sockaddr_un addr;
+        memset(&addr, 0, sizeof(addr)); /* Zero before use */
         addr.sun_family = AF_UNIX;
         strncpy(addr.sun_path, addr_str, sizeof(addr.sun_path) - 1);
         unlink(addr_str);
         conn->listen_fd = socket(AF_UNIX, SOCK_STREAM, 0);
         if (conn->listen_fd < 0)
-            return false;
+            goto mutex_fail;
 
         if (bind(conn->listen_fd, (struct sockaddr *) &addr, sizeof(addr)) <
             0) {
@@ -89,56 +86,43 @@ bool conn_init(conn_t *conn, char *addr_str, int port)
 
 fail:
     close(conn->listen_fd);
+mutex_fail:
+    pthread_mutex_destroy(&conn->send_mutex);
     return false;
-}
-
-void conn_recv_packet(conn_t *conn)
-{
-    while (!pktbuf_is_complete(&conn->pktbuf) &&
-           socket_readable(conn->socket_fd, -1)) {
-        ssize_t nread = pktbuf_fill_from_file(&conn->pktbuf, conn->socket_fd);
-        if (nread == -1)
-            break;
-    }
-
-    conn_send_str(conn, STR_ACK);
-}
-
-packet_t *conn_pop_packet(conn_t *conn)
-{
-    packet_t *pkt = pktbuf_pop_packet(&conn->pktbuf);
-
-    return pkt;
-}
-
-bool conn_try_recv_intr(conn_t *conn)
-{
-    char ch;
-
-    if (!socket_readable(conn->socket_fd, 0))
-        return false;
-
-    ssize_t nread = read(conn->socket_fd, &ch, 1);
-    if (nread != 1)
-        return false;
-
-    /* FIXME: The character must be INTR_CHAR, otherwise the library
-     * may work incorrectly. However, I'm not sure if this implementation
-     * can always meet our expectation (concurrent is so hard QAQ). */
-    assert(ch == INTR_CHAR);
-    return true;
 }
 
 void conn_send_str(conn_t *conn, char *str)
 {
     size_t len = strlen(str);
+    int total_waited = 0;
 
-    while (len > 0 && socket_writable(conn->socket_fd, -1)) {
+    pthread_mutex_lock(&conn->send_mutex);
+
+    while (len > 0) {
+        /* Use bounded poll timeout to prevent indefinite blocking.
+         * This allows the system to recover from broken connections
+         * and prevents priority inversion with reader thread. */
+        if (!socket_writable(conn->socket_fd, CONN_SEND_POLL_MS)) {
+            total_waited += CONN_SEND_POLL_MS;
+            if (total_waited >= CONN_SEND_TIMEOUT_MS)
+                break; /* Total timeout exceeded */
+            continue;
+        }
+
         ssize_t nwrite = write(conn->socket_fd, str, len);
-        if (nwrite == -1)
-            break;
+        if (nwrite == -1) {
+            if (errno == EINTR)
+                continue;
+            if (errno == EAGAIN || errno == EWOULDBLOCK)
+                continue;
+            break; /* Fatal error */
+        }
+        str += nwrite;
         len -= nwrite;
+        total_waited = 0; /* Reset timeout after successful write */
     }
+
+    pthread_mutex_unlock(&conn->send_mutex);
 }
 
 void conn_send_pktstr(conn_t *conn, char *pktstr)
@@ -169,9 +153,46 @@ void conn_send_pktstr(conn_t *conn, char *pktstr)
     conn_send_str(conn, packet);
 }
 
+bool conn_try_send_str(conn_t *conn, char *str)
+{
+    /* Try to acquire mutex without blocking.
+     * This prevents priority inversion where the reader thread
+     * blocks on send_mutex while trying to send ACKs. */
+    if (pthread_mutex_trylock(&conn->send_mutex) != 0)
+        return false; /* Mutex held by another thread */
+
+    size_t len = strlen(str);
+    bool success = true;
+
+    /* Use short timeout for non-blocking send */
+    while (len > 0) {
+        if (!socket_writable(conn->socket_fd, CONN_SEND_POLL_MS)) {
+            success = false;
+            break;
+        }
+
+        ssize_t nwrite = write(conn->socket_fd, str, len);
+        if (nwrite == -1) {
+            if (errno == EINTR)
+                continue;
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                success = false;
+                break;
+            }
+            success = false;
+            break; /* Fatal error */
+        }
+        str += nwrite;
+        len -= nwrite;
+    }
+
+    pthread_mutex_unlock(&conn->send_mutex);
+    return success && (len == 0);
+}
+
 void conn_close(conn_t *conn)
 {
     close(conn->socket_fd);
     close(conn->listen_fd);
-    pktbuf_destroy(&conn->pktbuf);
+    pthread_mutex_destroy(&conn->send_mutex);
 }
