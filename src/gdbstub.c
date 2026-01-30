@@ -1,21 +1,30 @@
-#include "gdbstub.h"
 #include <assert.h>
+#include <errno.h>
+#include <poll.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/select.h>
+
 #include "conn.h"
 #include "gdb_signal.h"
+#include "gdbstub.h"
 #include "packet.h"
+#include "pktqueue.h"
 #include "regbuf.h"
 #include "utils/csum.h"
 #include "utils/translate.h"
 
+/* Poll timeout for reader thread (milliseconds) */
+#define READER_POLL_TIMEOUT_MS 100
+
 struct gdbstub_private {
     conn_t conn;
     regbuf_t regbuf;
+    pktqueue_t pktqueue;
 
     pthread_t tid;
+    volatile bool thread_stop; /* Per-instance thread control */
+    bool reader_running;       /* Explicit flag for thread state */
     bool async_io_enable;
     void *args;
 
@@ -38,41 +47,95 @@ static inline bool async_io_is_enable(struct gdbstub_private *priv)
     return __atomic_load_n(&priv->async_io_enable, __ATOMIC_RELAXED);
 }
 
-static volatile bool thread_stop = false;
-static void *socket_reader(gdbstub_t *gdbstub)
+/* Reader thread: sole owner of all recv() calls on the socket.
+ *
+ * This thread reads from the socket, assembles complete packets,
+ * pushes them to the queue, and detects interrupt characters (0x03).
+ */
+static void *socket_reader(void *arg)
 {
-    void *args = gdbstub->priv->args;
-    int socket_fd = gdbstub->priv->conn.socket_fd;
+    gdbstub_t *gdbstub = (gdbstub_t *) arg;
+    struct gdbstub_private *priv = gdbstub->priv;
+    int socket_fd = priv->conn.socket_fd;
+    pktbuf_t pktbuf;
 
-    fd_set readfds;
-    struct timeval timeout;
+    if (!pktbuf_init(&pktbuf)) {
+        pktqueue_signal_shutdown(&priv->pktqueue);
+        return NULL;
+    }
 
-    while (!__atomic_load_n(&thread_stop, __ATOMIC_RELAXED)) {
-        if (!async_io_is_enable(gdbstub->priv)) {
-            usleep(10000);
-            continue;
+    struct pollfd pfd = {.fd = socket_fd, .events = POLLIN};
+
+    while (!__atomic_load_n(&priv->thread_stop, __ATOMIC_RELAXED)) {
+        int result = poll(&pfd, 1, READER_POLL_TIMEOUT_MS);
+
+        if (result < 0) {
+            if (errno == EINTR)
+                continue;
+            perror("poll error in socket_reader");
+            break;
         }
 
-        FD_ZERO(&readfds);
-        FD_SET(socket_fd, &readfds);
+        if (result == 0)
+            continue; /* Timeout, check thread_stop */
 
-        timeout.tv_sec = 0;
-        timeout.tv_usec = 100000;
+        if (!(pfd.revents & POLLIN))
+            continue;
 
-        int result = select(socket_fd + 1, &readfds, NULL, NULL, &timeout);
+        /* Read available data into buffer */
+        ssize_t nread = pktbuf_fill_from_file(&pktbuf, socket_fd);
 
-        if (result > 0 && FD_ISSET(socket_fd, &readfds)) {
-            char ch;
-            ssize_t nread = read(socket_fd, &ch, 1);
-            if (nread == 1 && ch == INTR_CHAR) {
-                gdbstub->ops->on_interrupt(args);
-            }
-        } else if (result < 0) {
-            perror("select error in socket_reader");
+        if (nread == 0) {
+            /* EOF - clean disconnect */
             break;
+        }
+
+        if (nread < 0) {
+            if (errno == EINTR)
+                continue;
+            if (errno == EAGAIN || errno == EWOULDBLOCK)
+                continue;
+            /* Fatal error: ECONNRESET, EPIPE, etc. */
+            break;
+        }
+
+        /* Check for interrupt character in the received data.
+         * The interrupt char (0x03) can appear outside packet framing,
+         * so we scan the raw buffer before packet assembly. */
+        uint8_t *buf_start = pktbuf.data + pktbuf.size - nread;
+        for (ssize_t i = 0; i < nread; i++) {
+            if (buf_start[i] == INTR_CHAR) {
+                /* Signal interrupt to main thread */
+                if (async_io_is_enable(priv) && gdbstub->ops->on_interrupt) {
+                    gdbstub->ops->on_interrupt(priv->args);
+                }
+                pktqueue_signal_interrupt(&priv->pktqueue);
+            }
+        }
+
+        /* Process complete packets */
+        while (pktbuf_is_complete(&pktbuf)) {
+            packet_t *pkt = pktbuf_pop_packet(&pktbuf);
+            if (pkt) {
+                /* Push to queue first, only ACK after successful push.
+                 * This ensures ACK timing reflects actual packet acceptance. */
+                if (pktqueue_push(&priv->pktqueue, pkt)) {
+                    /* Use non-blocking send for ACK to prevent priority
+                     * inversion. If main thread holds send_mutex, ACK is
+                     * skipped and GDB will retransmit on timeout. This
+                     * keeps the reader thread responsive for interrupts. */
+                    conn_try_send_str(&priv->conn, STR_ACK);
+                } else {
+                    /* Allocation failure - free packet, skip ACK.
+                     * GDB will timeout and retransmit. */
+                    free(pkt);
+                }
+            }
         }
     }
 
+    pktbuf_destroy(&pktbuf);
+    pktqueue_signal_shutdown(&priv->pktqueue);
     return NULL;
 }
 
@@ -98,12 +161,13 @@ bool gdbstub_init(gdbstub_t *gdbstub,
     for (int i = 0; i < arch.reg_num; i++)
         gdbstub->priv->total_reg_bytes += ops->get_reg_bytes(i);
 
-    // This is a naive implementation to parse the string
+    /* Parse address string (format: "host:port" or "path") */
     addr_str = strdup(s);
+    if (!addr_str)
+        goto priv_fail;
+
     char *port_str = strchr(addr_str, ':');
     int port = 0;
-    if (addr_str == NULL)
-        goto addr_fail;
 
     if (port_str != NULL) {
         *port_str = '\0';
@@ -116,16 +180,24 @@ bool gdbstub_init(gdbstub_t *gdbstub,
     if (!regbuf_init(&gdbstub->priv->regbuf))
         goto addr_fail;
 
+    if (!pktqueue_init(&gdbstub->priv->pktqueue))
+        goto regbuf_fail;
+
     if (!conn_init(&gdbstub->priv->conn, addr_str, port))
-        goto conn_fail;
+        goto pktqueue_fail;
 
     free(addr_str);
     return true;
 
-conn_fail:
+pktqueue_fail:
+    pktqueue_destroy(&gdbstub->priv->pktqueue);
+regbuf_fail:
     regbuf_destroy(&gdbstub->priv->regbuf);
 addr_fail:
     free(addr_str);
+priv_fail:
+    free(gdbstub->priv);
+    gdbstub->priv = NULL;
     return false;
 }
 
@@ -813,19 +885,36 @@ static void gdbstub_act_resume(gdbstub_t *gdbstub)
 
 bool gdbstub_run(gdbstub_t *gdbstub, void *args)
 {
-    // Bring the user-provided argument in the gdbstub_t structure
+    /* Store user-provided argument in the gdbstub_t structure */
     gdbstub->priv->args = args;
 
-    /* Create a thread to receive interrupt when running the gdbstub op */
-    if (gdbstub->ops->on_interrupt != NULL && gdbstub->priv->tid == 0) {
+    /* Create reader thread - it's the sole owner of all socket recv() calls.
+     * This eliminates the race condition where both threads read the socket. */
+    if (!gdbstub->priv->reader_running) {
+        gdbstub->priv->thread_stop = false;
         async_io_disable(gdbstub->priv);
-        pthread_create(&gdbstub->priv->tid, NULL, (void *) socket_reader,
-                       (void *) gdbstub);
+        int rc = pthread_create(&gdbstub->priv->tid, NULL, socket_reader,
+                                (void *) gdbstub);
+        if (rc != 0) {
+            perror("pthread_create failed");
+            return false;
+        }
+        gdbstub->priv->reader_running = true;
     }
 
     while (true) {
-        conn_recv_packet(&gdbstub->priv->conn);
-        packet_t *pkt = conn_pop_packet(&gdbstub->priv->conn);
+        /* Pop packet from queue (blocks until available or shutdown) */
+        packet_t *pkt = pktqueue_pop(&gdbstub->priv->pktqueue);
+
+        if (!pkt) {
+            /* Check if shutdown or just interrupt */
+            if (pktqueue_is_shutdown(&gdbstub->priv->pktqueue))
+                return true; /* Clean shutdown */
+            /* Clear interrupt flag to prevent busy loop */
+            pktqueue_check_interrupt(&gdbstub->priv->pktqueue);
+            continue;
+        }
+
 #ifdef DEBUG
         printf("packet = %s\n", pkt->data);
 #endif
@@ -843,18 +932,20 @@ bool gdbstub_run(gdbstub_t *gdbstub, void *args)
             break;
         }
     }
-
-    return false;
 }
 
 void gdbstub_close(gdbstub_t *gdbstub)
 {
-    /* Use thread ID to make sure the thread was created */
-    if (gdbstub->priv->tid != 0) {
-        __atomic_store_n(&thread_stop, true, __ATOMIC_RELAXED);
+    /* Signal reader thread to stop and wait for it */
+    if (gdbstub->priv->reader_running) {
+        __atomic_store_n(&gdbstub->priv->thread_stop, true, __ATOMIC_RELAXED);
+        pktqueue_signal_shutdown(&gdbstub->priv->pktqueue);
         pthread_join(gdbstub->priv->tid, NULL);
+        gdbstub->priv->reader_running = false;
     }
 
+    pktqueue_destroy(&gdbstub->priv->pktqueue);
+    regbuf_destroy(&gdbstub->priv->regbuf);
     conn_close(&gdbstub->priv->conn);
     free(gdbstub->priv);
 }
