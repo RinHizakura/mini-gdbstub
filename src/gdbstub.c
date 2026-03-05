@@ -9,6 +9,7 @@
 #include "packet.h"
 #include "regbuf.h"
 #include "utils/csum.h"
+#include "utils/log.h"
 #include "utils/translate.h"
 
 struct gdbstub_private {
@@ -472,10 +473,12 @@ static void process_query(gdbstub_t *gdbstub, char *payload, void *args)
             conn_send_pktstr(&gdbstub->priv->conn, "");
     } else if (!strcmp(name, "Supported")) {
         if (gdbstub->arch.target_desc != NULL)
-            conn_send_pktstr(&gdbstub->priv->conn,
-                             "PacketSize=1024;qXfer:features:read+");
+            conn_send_pktstr(
+                &gdbstub->priv->conn,
+                "PacketSize=1024;qXfer:features:read+;QStartNoAckMode+");
         else
-            conn_send_pktstr(&gdbstub->priv->conn, "PacketSize=1024");
+            conn_send_pktstr(&gdbstub->priv->conn,
+                             "PacketSize=1024;QStartNoAckMode+");
     } else if (!strcmp(name, "Attached")) {
         /* assume attached to an existing process */
         conn_send_pktstr(&gdbstub->priv->conn, "1");
@@ -506,6 +509,56 @@ static void process_query(gdbstub_t *gdbstub, char *payload, void *args)
     } else if (!strcmp(name, "sThreadInfo")) {
         conn_send_pktstr(&gdbstub->priv->conn, "l");
     } else {
+        conn_send_pktstr(&gdbstub->priv->conn, "");
+    }
+}
+
+/* Process 'Q' packets (general set commands)
+ *
+ * Currently supported:
+ *   QStartNoAckMode - disable ACK/NACK for significant throughput improvement
+ *
+ * QStartNoAckMode Protocol Flow:
+ *
+ *   GDB                                    Stub
+ *    |                                      |
+ *    |-- $qSupported:... ------------------>|
+ *    |<------------- +$PacketSize=1024;QStartNoAckMode+#xx
+ *    |                                      |
+ *    |-- +$QStartNoAckMode#b0 ------------->|  GDB requests no-ack mode
+ *    |<-------------------------- +$OK#9a --|  Stub ACKs and replies OK
+ *    |                                      |  (last ACK exchange)
+ *    |                                      |
+ *    |-- $?#3f ---------------------------->|  No ACK prefix from GDB
+ *    |<-------------------------- $S05#b8 --|  No ACK prefix from stub
+ *    |                                      |
+ *
+ * Key: After stub sends OK response, both sides stop sending +/- ACKs.
+ */
+static void process_general_set(gdbstub_t *gdbstub, char *payload)
+{
+    char *name = payload;
+    char *qargs = strchr(payload, ':');
+    if (qargs) {
+        *qargs = '\0';
+        qargs++;
+    }
+#ifdef DEBUG
+    printf("general set = %s %s\n", name, qargs);
+#endif
+
+    if (!strcmp(name, "StartNoAckMode")) {
+        /* Per GDB RSP: reply OK with acking still on, then disable after.
+         * Since conn_send_pktstr is synchronous, we can set the flag
+         * immediately after sending - the next packet won't ACK.
+         */
+        conn_send_pktstr(&gdbstub->priv->conn, "OK");
+        gdbstub->priv->conn.no_ack_mode = true;
+#ifdef DEBUG
+        printf("No-ack mode enabled\n");
+#endif
+    } else {
+        /* Unknown Q packet - send empty response */
         conn_send_pktstr(&gdbstub->priv->conn, "");
     }
 }
@@ -665,7 +718,7 @@ static gdb_event_t gdbstub_process_packet(gdbstub_t *gdbstub,
                                           void *args)
 {
     assert(inpkt->data[0] == '$');
-    assert(packet_csum_verify(inpkt));
+    /* Checksum is verified in gdbstub_run() before calling this function */
 
     /* After checking the checksum result, ignore those bytes */
     inpkt->data[inpkt->end_pos - CSUM_SIZE] = 0;
@@ -701,6 +754,9 @@ static gdb_event_t gdbstub_process_packet(gdbstub_t *gdbstub,
     case 'q':
         process_query(gdbstub, payload, args);
         break;
+    case 'Q':
+        process_general_set(gdbstub, payload);
+        break;
     case 's':
         event = process_stepi(gdbstub);
         break;
@@ -718,6 +774,8 @@ static gdb_event_t gdbstub_process_packet(gdbstub_t *gdbstub,
         conn_send_pktstr(&gdbstub->priv->conn, "S05");
         break;
     case 'D':
+        /* Send OK before detaching per GDB Remote Serial Protocol */
+        conn_send_pktstr(&gdbstub->priv->conn, "OK");
         event = EVENT_DETACH;
         break;
     case 'G':
@@ -811,9 +869,43 @@ static void gdbstub_act_resume(gdbstub_t *gdbstub)
     conn_send_pktstr(&gdbstub->priv->conn, packet_str);
 }
 
+/* Main GDB stub event loop
+ *
+ * Checksum Verification and ACK/NACK Protocol Flow:
+ *
+ *   ACK Mode (default):
+ *   -------------------
+ *   GDB                                    Stub
+ *    |                                      |
+ *    |-- $cmd#xx --------------------------->|  GDB sends packet
+ *    |                        [verify csum]  |
+ *    |                               |       |
+ *    |                      csum OK? |       |
+ *    |                         yes   |  no   |
+ *    |                          v    |   v   |
+ *    |<----------------------- + ----|  - ---|  ACK or NACK
+ *    |<----------------- $reply#xx --|       |  (process on ACK)
+ *    |                               |       |
+ *    |-- $cmd#xx -------------------->|      |  (retransmit on NACK)
+ *
+ *   No-ACK Mode (after QStartNoAckMode):
+ *   ------------------------------------
+ *   GDB                                    Stub
+ *    |                                      |
+ *    |-- $cmd#xx --------------------------->|  GDB sends packet
+ *    |                        [verify csum]  |
+ *    |                               |       |
+ *    |                      csum OK? |       |
+ *    |                         yes   |  no   |
+ *    |                          v    |   v   |
+ *    |<----------------- $reply#xx --|  drop |  No +/- sent
+ *    |                                      |
+ *
+ *   Failure Threshold: After CONN_MAX_FAILURES (50) consecutive
+ *   checksum failures, the stub disconnects to prevent DoS.
+ */
 bool gdbstub_run(gdbstub_t *gdbstub, void *args)
 {
-    // Bring the user-provided argument in the gdbstub_t structure
     gdbstub->priv->args = args;
 
     /* Create a thread to receive interrupt when running the gdbstub op */
@@ -823,9 +915,43 @@ bool gdbstub_run(gdbstub_t *gdbstub, void *args)
                        (void *) gdbstub);
     }
 
+    conn_t *conn = &gdbstub->priv->conn;
+
     while (true) {
-        conn_recv_packet(&gdbstub->priv->conn);
-        packet_t *pkt = conn_pop_packet(&gdbstub->priv->conn);
+        conn_recv_packet(conn);
+        packet_t *pkt = conn_pop_packet(conn);
+
+        if (!pkt) {
+            /* No complete packet - connection may have closed */
+            return false;
+        }
+
+        /* Verify checksum before processing */
+        if (!packet_csum_verify(pkt)) {
+            if (!conn->no_ack_mode) {
+                /* In ack mode: send NACK to request retransmission */
+                conn_send_str(conn, STR_NACK);
+            }
+            /* In no-ack mode: verify but don't send +/- */
+
+            conn->failure_count++;
+            if (conn->failure_count >= CONN_MAX_FAILURES) {
+                warn("Too many consecutive failures (%d), disconnecting\n",
+                     conn->failure_count);
+                free(pkt);
+                return false;
+            }
+            free(pkt);
+            continue; /* Discard packet and wait for retransmission */
+        }
+
+        /* Checksum OK - reset failure counter */
+        conn->failure_count = 0;
+
+        /* Send ACK only in ack mode */
+        if (!conn->no_ack_mode)
+            conn_send_str(conn, STR_ACK);
+
 #ifdef DEBUG
         printf("packet = %s\n", pkt->data);
 #endif
