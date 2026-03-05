@@ -513,28 +513,6 @@ static void process_query(gdbstub_t *gdbstub, char *payload, void *args)
     }
 }
 
-/* Process 'Q' packets (general set commands)
- *
- * Currently supported:
- *   QStartNoAckMode - disable ACK/NACK for significant throughput improvement
- *
- * QStartNoAckMode Protocol Flow:
- *
- *   GDB                                    Stub
- *    |                                      |
- *    |-- $qSupported:... ------------------>|
- *    |<------------- +$PacketSize=1024;QStartNoAckMode+#xx
- *    |                                      |
- *    |-- +$QStartNoAckMode#b0 ------------->|  GDB requests no-ack mode
- *    |<-------------------------- +$OK#9a --|  Stub ACKs and replies OK
- *    |                                      |  (last ACK exchange)
- *    |                                      |
- *    |-- $?#3f ---------------------------->|  No ACK prefix from GDB
- *    |<-------------------------- $S05#b8 --|  No ACK prefix from stub
- *    |                                      |
- *
- * Key: After stub sends OK response, both sides stop sending +/- ACKs.
- */
 static void process_general_set(gdbstub_t *gdbstub, char *payload)
 {
     char *name = payload;
@@ -868,42 +846,6 @@ static void gdbstub_act_resume(gdbstub_t *gdbstub)
     sprintf(packet_str, "S%02x", GDB_SIGNAL_TRAP);
     conn_send_pktstr(&gdbstub->priv->conn, packet_str);
 }
-
-/* Main GDB stub event loop
- *
- * Checksum Verification and ACK/NACK Protocol Flow:
- *
- *   ACK Mode (default):
- *   -------------------
- *   GDB                                    Stub
- *    |                                      |
- *    |-- $cmd#xx --------------------------->|  GDB sends packet
- *    |                        [verify csum]  |
- *    |                               |       |
- *    |                      csum OK? |       |
- *    |                         yes   |  no   |
- *    |                          v    |   v   |
- *    |<----------------------- + ----|  - ---|  ACK or NACK
- *    |<----------------- $reply#xx --|       |  (process on ACK)
- *    |                               |       |
- *    |-- $cmd#xx -------------------->|      |  (retransmit on NACK)
- *
- *   No-ACK Mode (after QStartNoAckMode):
- *   ------------------------------------
- *   GDB                                    Stub
- *    |                                      |
- *    |-- $cmd#xx --------------------------->|  GDB sends packet
- *    |                        [verify csum]  |
- *    |                               |       |
- *    |                      csum OK? |       |
- *    |                         yes   |  no   |
- *    |                          v    |   v   |
- *    |<----------------- $reply#xx --|  drop |  No +/- sent
- *    |                                      |
- *
- *   Failure Threshold: After CONN_MAX_FAILURES (50) consecutive
- *   checksum failures, the stub disconnects to prevent DoS.
- */
 
 /* Maximum consecutive checksum failures before disconnecting */
 #define CONN_MAX_FAILURES 50
