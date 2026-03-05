@@ -904,6 +904,10 @@ static void gdbstub_act_resume(gdbstub_t *gdbstub)
  *   Failure Threshold: After CONN_MAX_FAILURES (50) consecutive
  *   checksum failures, the stub disconnects to prevent DoS.
  */
+
+/* Maximum consecutive checksum failures before disconnecting */
+#define CONN_MAX_FAILURES 50
+
 bool gdbstub_run(gdbstub_t *gdbstub, void *args)
 {
     gdbstub->priv->args = args;
