@@ -13,7 +13,7 @@
 
 static bool socket_poll(int socket_fd, int timeout, int events)
 {
-    struct pollfd pfd = (struct pollfd) {
+    struct pollfd pfd = (struct pollfd){
         .fd = socket_fd,
         .events = events,
     };
