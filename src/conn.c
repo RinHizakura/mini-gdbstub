@@ -13,7 +13,7 @@
 
 static bool socket_poll(int socket_fd, int timeout, int events)
 {
-    struct pollfd pfd = (struct pollfd){
+    struct pollfd pfd = (struct pollfd) {
         .fd = socket_fd,
         .events = events,
     };
@@ -104,7 +104,6 @@ void conn_recv_packet(conn_t *conn)
         if (nread <= 0)
             break; /* EOF (0) or error (-1) */
     }
-    /* ACK/NACK is now sent by gdbstub_run() after checksum verification */
 }
 
 packet_t *conn_pop_packet(conn_t *conn)

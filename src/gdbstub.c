@@ -696,9 +696,7 @@ static gdb_event_t gdbstub_process_packet(gdbstub_t *gdbstub,
                                           void *args)
 {
     assert(inpkt->data[0] == '$');
-    /* Checksum is verified in gdbstub_run() before calling this function */
 
-    /* After checking the checksum result, ignore those bytes */
     inpkt->data[inpkt->end_pos - CSUM_SIZE] = 0;
     uint8_t request = inpkt->data[1];
     char *payload = (char *) &inpkt->data[2];
