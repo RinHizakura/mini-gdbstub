@@ -526,17 +526,12 @@ static void process_general_set(gdbstub_t *gdbstub, char *payload)
 #endif
 
     if (!strcmp(name, "StartNoAckMode")) {
-        /* Per GDB RSP: reply OK with acking still on, then disable after.
-         * Since conn_send_pktstr is synchronous, we can set the flag
-         * immediately after sending - the next packet won't ACK.
-         */
-        conn_send_pktstr(&gdbstub->priv->conn, "OK");
         gdbstub->priv->conn.no_ack_mode = true;
+        conn_send_pktstr(&gdbstub->priv->conn, "OK");
 #ifdef DEBUG
         printf("No-ack mode enabled\n");
 #endif
     } else {
-        /* Unknown Q packet - send empty response */
         conn_send_pktstr(&gdbstub->priv->conn, "");
     }
 }
@@ -871,30 +866,24 @@ bool gdbstub_run(gdbstub_t *gdbstub, void *args)
         }
 
         /* Verify checksum before processing */
-        if (!packet_csum_verify(pkt)) {
-            if (!conn->no_ack_mode) {
-                /* In ack mode: send NACK to request retransmission */
-                conn_send_str(conn, STR_NACK);
-            }
-            /* In no-ack mode: verify but don't send +/- */
+        bool csum_ok = packet_csum_verify(pkt);
+        if (!conn->no_ack_mode)
+            conn_send_str(conn, csum_ok ? STR_ACK : STR_NACK);
+
+        if (!csum_ok) {
+            free(pkt);
 
             conn->failure_count++;
             if (conn->failure_count >= CONN_MAX_FAILURES) {
                 warn("Too many consecutive failures (%d), disconnecting\n",
                      conn->failure_count);
-                free(pkt);
                 return false;
             }
-            free(pkt);
             continue; /* Discard packet and wait for retransmission */
         }
 
         /* Checksum OK - reset failure counter */
         conn->failure_count = 0;
-
-        /* Send ACK only in ack mode */
-        if (!conn->no_ack_mode)
-            conn_send_str(conn, STR_ACK);
 
 #ifdef DEBUG
         printf("packet = %s\n", pkt->data);
