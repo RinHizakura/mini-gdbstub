@@ -14,9 +14,6 @@ typedef struct {
 
     pthread_mutex_t send_mutex; /* Serialize socket writes */
 
-
-    pktbuf_t pktbuf;
-
     /* Protocol state */
     bool no_ack_mode;  /* true after QStartNoAckMode negotiation */
     int failure_count; /* consecutive checksum/protocol failures */
