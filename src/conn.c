@@ -60,7 +60,6 @@ bool conn_init(conn_t *conn, char *addr_str, int port)
         }
     } else {
         struct sockaddr_un addr;
-        memset(&addr, 0, sizeof(addr)); /* Zero before use */
         addr.sun_family = AF_UNIX;
         strncpy(addr.sun_path, addr_str, sizeof(addr.sun_path) - 1);
         unlink(addr_str);
