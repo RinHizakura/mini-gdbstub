@@ -95,6 +95,11 @@ mutex_fail:
     return false;
 }
 
+/* Timeout for socket write operations (milliseconds).
+ * Prevents indefinite blocking if connection is congested or broken. */
+#define CONN_SEND_TIMEOUT_MS 5000
+#define CONN_SEND_POLL_MS 100
+
 void conn_send_str(conn_t *conn, char *str)
 {
     size_t len = strlen(str);

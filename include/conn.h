@@ -8,11 +8,6 @@
 #define MAX_SEND_PACKET_SIZE (0x1000)
 #define MAX_DATA_PAYLOAD (MAX_SEND_PACKET_SIZE - (2 + CSUM_SIZE + 2))
 
-/* Timeout for socket write operations (milliseconds).
- * Prevents indefinite blocking if connection is congested or broken. */
-#define CONN_SEND_TIMEOUT_MS 5000
-#define CONN_SEND_POLL_MS 100
-
 typedef struct {
     int listen_fd;
     int socket_fd;
