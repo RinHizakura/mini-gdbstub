@@ -12,6 +12,7 @@
 #include "pktqueue.h"
 #include "regbuf.h"
 #include "utils/csum.h"
+#include "utils/log.h"
 #include "utils/translate.h"
 
 /* Poll timeout for reader thread (milliseconds) */
@@ -544,10 +545,12 @@ static void process_query(gdbstub_t *gdbstub, char *payload, void *args)
             conn_send_pktstr(&gdbstub->priv->conn, "");
     } else if (!strcmp(name, "Supported")) {
         if (gdbstub->arch.target_desc != NULL)
-            conn_send_pktstr(&gdbstub->priv->conn,
-                             "PacketSize=1024;qXfer:features:read+");
+            conn_send_pktstr(
+                &gdbstub->priv->conn,
+                "PacketSize=1024;qXfer:features:read+;QStartNoAckMode+");
         else
-            conn_send_pktstr(&gdbstub->priv->conn, "PacketSize=1024");
+            conn_send_pktstr(&gdbstub->priv->conn,
+                             "PacketSize=1024;QStartNoAckMode+");
     } else if (!strcmp(name, "Attached")) {
         /* assume attached to an existing process */
         conn_send_pktstr(&gdbstub->priv->conn, "1");
@@ -577,6 +580,29 @@ static void process_query(gdbstub_t *gdbstub, char *payload, void *args)
         conn_send_pktstr(&gdbstub->priv->conn, packet_str);
     } else if (!strcmp(name, "sThreadInfo")) {
         conn_send_pktstr(&gdbstub->priv->conn, "l");
+    } else {
+        conn_send_pktstr(&gdbstub->priv->conn, "");
+    }
+}
+
+static void process_general_set(gdbstub_t *gdbstub, char *payload)
+{
+    char *name = payload;
+    char *qargs = strchr(payload, ':');
+    if (qargs) {
+        *qargs = '\0';
+        qargs++;
+    }
+#ifdef DEBUG
+    printf("general set = %s %s\n", name, qargs);
+#endif
+
+    if (!strcmp(name, "StartNoAckMode")) {
+        gdbstub->priv->conn.no_ack_mode = true;
+        conn_send_pktstr(&gdbstub->priv->conn, "OK");
+#ifdef DEBUG
+        printf("No-ack mode enabled\n");
+#endif
     } else {
         conn_send_pktstr(&gdbstub->priv->conn, "");
     }
@@ -737,9 +763,7 @@ static gdb_event_t gdbstub_process_packet(gdbstub_t *gdbstub,
                                           void *args)
 {
     assert(inpkt->data[0] == '$');
-    assert(packet_csum_verify(inpkt));
 
-    /* After checking the checksum result, ignore those bytes */
     inpkt->data[inpkt->end_pos - CSUM_SIZE] = 0;
     uint8_t request = inpkt->data[1];
     char *payload = (char *) &inpkt->data[2];
@@ -773,6 +797,9 @@ static gdb_event_t gdbstub_process_packet(gdbstub_t *gdbstub,
     case 'q':
         process_query(gdbstub, payload, args);
         break;
+    case 'Q':
+        process_general_set(gdbstub, payload);
+        break;
     case 's':
         event = process_stepi(gdbstub);
         break;
@@ -790,6 +817,8 @@ static gdb_event_t gdbstub_process_packet(gdbstub_t *gdbstub,
         conn_send_pktstr(&gdbstub->priv->conn, "S05");
         break;
     case 'D':
+        /* Send OK before detaching per GDB Remote Serial Protocol */
+        conn_send_pktstr(&gdbstub->priv->conn, "OK");
         event = EVENT_DETACH;
         break;
     case 'G':
@@ -883,6 +912,9 @@ static void gdbstub_act_resume(gdbstub_t *gdbstub)
     conn_send_pktstr(&gdbstub->priv->conn, packet_str);
 }
 
+/* Maximum consecutive checksum failures before disconnecting */
+#define CONN_MAX_FAILURES 50
+
 bool gdbstub_run(gdbstub_t *gdbstub, void *args)
 {
     /* Store user-provided argument in the gdbstub_t structure */
@@ -902,6 +934,8 @@ bool gdbstub_run(gdbstub_t *gdbstub, void *args)
         gdbstub->priv->reader_running = true;
     }
 
+    conn_t *conn = &gdbstub->priv->conn;
+
     while (true) {
         /* Pop packet from queue (blocks until available or shutdown) */
         packet_t *pkt = pktqueue_pop(&gdbstub->priv->pktqueue);
@@ -914,6 +948,26 @@ bool gdbstub_run(gdbstub_t *gdbstub, void *args)
             pktqueue_check_interrupt(&gdbstub->priv->pktqueue);
             continue;
         }
+
+        /* Verify checksum before processing */
+        bool csum_ok = packet_csum_verify(pkt);
+        if (!conn->no_ack_mode)
+            conn_send_str(conn, csum_ok ? STR_ACK : STR_NACK);
+
+        if (!csum_ok) {
+            free(pkt);
+
+            conn->failure_count++;
+            if (conn->failure_count >= CONN_MAX_FAILURES) {
+                warn("Too many consecutive failures (%d), disconnecting\n",
+                     conn->failure_count);
+                return false;
+            }
+            continue; /* Discard packet and wait for retransmission */
+        }
+
+        /* Checksum OK - reset failure counter */
+        conn->failure_count = 0;
 
 #ifdef DEBUG
         printf("packet = %s\n", pkt->data);

@@ -32,6 +32,10 @@ bool conn_init(conn_t *conn, char *addr_str, int port)
     if (pthread_mutex_init(&conn->send_mutex, NULL) != 0)
         return false;
 
+    /* Initialize protocol state */
+    conn->no_ack_mode = false;
+    conn->failure_count = 0;
+
     struct in_addr addr_ip;
     if (inet_aton(addr_str, &addr_ip) != 0) {
         struct sockaddr_in addr;

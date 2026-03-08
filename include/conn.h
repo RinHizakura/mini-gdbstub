@@ -16,7 +16,16 @@
 typedef struct {
     int listen_fd;
     int socket_fd;
+
     pthread_mutex_t send_mutex; /* Serialize socket writes */
+
+
+    pktbuf_t pktbuf;
+
+    /* Protocol state */
+    bool no_ack_mode;  /* true after QStartNoAckMode negotiation */
+    int failure_count; /* consecutive checksum/protocol failures */
+
 } conn_t;
 
 bool conn_init(conn_t *conn, char *addr_str, int port);
