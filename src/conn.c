@@ -3,6 +3,7 @@
 #include <assert.h>
 #include <errno.h>
 #include <netinet/in.h>
+#include <netinet/tcp.h>
 #include <poll.h>
 #include <stdio.h>
 #include <string.h>
@@ -36,8 +37,10 @@ bool conn_init(conn_t *conn, char *addr_str, int port)
     conn->no_ack_mode = false;
     conn->failure_count = 0;
 
+    int optval = 1;
     struct in_addr addr_ip;
-    if (inet_aton(addr_str, &addr_ip) != 0) {
+    int is_tcp_mode = inet_aton(addr_str, &addr_ip);
+    if (is_tcp_mode) {
         struct sockaddr_in addr;
         addr.sin_family = AF_INET;
         addr.sin_addr.s_addr = addr_ip.s_addr;
@@ -46,7 +49,6 @@ bool conn_init(conn_t *conn, char *addr_str, int port)
         if (conn->listen_fd < 0)
             goto mutex_fail;
 
-        int optval = 1;
         if (setsockopt(conn->listen_fd, SOL_SOCKET, SO_REUSEADDR, &optval,
                        sizeof(optval)) < 0) {
             warn("Set sockopt fail.\n");
@@ -83,6 +85,11 @@ bool conn_init(conn_t *conn, char *addr_str, int port)
     if (conn->socket_fd < 0) {
         warn("Accept fail.\n");
         goto fail;
+    }
+
+    if (is_tcp_mode && setsockopt(conn->socket_fd, IPPROTO_TCP, TCP_NODELAY,
+                                  &optval, sizeof(optval)) < 0) {
+        warn("Set TCP_NODELAY fail.\n");
     }
 
     return true;
