@@ -169,7 +169,7 @@ get_reg_hex_len()
 # Extracts the quoted content from 'received: "..."' lines, then filters
 # for pure hex strings of at least 64 characters (smallest valid register
 # dump: 8 regs * 4 bytes * 2 hex = 64). This avoids matching short
-# protocol responses (OK, E22, qSupported, etc.).
+# protocol responses (OK, E16, qSupported, etc.).
 extract_reg_blob()
 {
     local file="$1"

@@ -201,8 +201,15 @@ priv_fail:
     return false;
 }
 
-#define SEND_ERR(gdbstub, err) conn_send_pktstr(&gdbstub->priv->conn, err)
-#define SEND_EPERM(gdbstub) SEND_ERR(gdbstub, "E01")
+/* An error reply carries the errno as two hex digits: "E NN" */
+static void send_errno(gdbstub_t *gdbstub, int err)
+{
+    char packet_str[8];
+    snprintf(packet_str, sizeof(packet_str), "E%02x", err & 0xff);
+    conn_send_pktstr(&gdbstub->priv->conn, packet_str);
+}
+#define SEND_EPERM(gdbstub) send_errno(gdbstub, EPERM)
+#define SEND_EINVAL(gdbstub) send_errno(gdbstub, EINVAL)
 
 static gdb_event_t process_cont(gdbstub_t *gdbstub)
 {
@@ -247,7 +254,7 @@ static void process_reg_read(gdbstub_t *gdbstub, void *args)
             hex_to_str((uint8_t *) reg_value, &packet_str[i * reg_sz * 2],
                        reg_sz);
         } else {
-            sprintf(packet_str, "E%d", ret);
+            snprintf(packet_str, sizeof(packet_str), "E%02x", ret & 0xff);
             break;
         }
     }
@@ -271,11 +278,11 @@ static void process_reg_read_one(gdbstub_t *gdbstub, char *payload, void *args)
     printf("reg read = regno %d data 0x%s (size %zu)\n", regno, debug_hex,
            reg_sz);
 #endif
-    if (!ret) {
-        hex_to_str((uint8_t *) reg_value, packet_str, reg_sz);
-    } else {
-        sprintf(packet_str, "E%d", ret);
+    if (ret) {
+        send_errno(gdbstub, ret);
+        return;
     }
+    hex_to_str((uint8_t *) reg_value, packet_str, reg_sz);
     conn_send_pktstr(&gdbstub->priv->conn, packet_str);
 }
 
@@ -295,7 +302,7 @@ static void process_reg_write(gdbstub_t *gdbstub, char *payload, void *args)
     /* Validate payload length matches expected register count */
     size_t payload_len = strlen(payload);
     if (payload_len != expected_hex_len) {
-        conn_send_pktstr(&gdbstub->priv->conn, "E22"); /* EINVAL */
+        SEND_EINVAL(gdbstub);
         return;
     }
 
@@ -305,7 +312,7 @@ static void process_reg_write(gdbstub_t *gdbstub, char *payload, void *args)
     if (!new_values || !backup_values) {
         free(new_values);
         free(backup_values);
-        conn_send_pktstr(&gdbstub->priv->conn, "E12"); /* ENOMEM */
+        send_errno(gdbstub, ENOMEM);
         return;
     }
 
@@ -326,9 +333,7 @@ static void process_reg_write(gdbstub_t *gdbstub, char *payload, void *args)
             /* Cannot read current state; abort without modifying */
             free(new_values);
             free(backup_values);
-            char packet_str[16];
-            sprintf(packet_str, "E%d", ret);
-            conn_send_pktstr(&gdbstub->priv->conn, packet_str);
+            send_errno(gdbstub, ret);
             return;
         }
 
@@ -368,9 +373,7 @@ static void process_reg_write(gdbstub_t *gdbstub, char *payload, void *args)
         }
         free(new_values);
         free(backup_values);
-        char packet_str[16];
-        sprintf(packet_str, "E%d", error_code);
-        conn_send_pktstr(&gdbstub->priv->conn, packet_str);
+        send_errno(gdbstub, error_code);
         return;
     }
 
@@ -402,14 +405,10 @@ static void process_reg_write_one(gdbstub_t *gdbstub, char *payload, void *args)
 #endif
 
     int ret = gdbstub->ops->write_reg(args, regno, data);
-
-    if (!ret) {
+    if (ret)
+        send_errno(gdbstub, ret);
+    else
         conn_send_pktstr(&gdbstub->priv->conn, "OK");
-    } else {
-        char packet_str[MAX_SEND_PACKET_SIZE];
-        sprintf(packet_str, "E%d", ret);
-        conn_send_pktstr(&gdbstub->priv->conn, packet_str);
-    }
 }
 
 static void process_mem_read(gdbstub_t *gdbstub, char *payload, void *args)
@@ -423,12 +422,12 @@ static void process_mem_read(gdbstub_t *gdbstub, char *payload, void *args)
 
     uint8_t *mval = malloc(mlen);
     int ret = gdbstub->ops->read_mem(args, maddr, mlen, mval);
-    if (!ret) {
-        hex_to_str(mval, packet_str, mlen);
+    if (ret) {
+        send_errno(gdbstub, ret);
     } else {
-        sprintf(packet_str, "E%d", ret);
+        hex_to_str(mval, packet_str, mlen);
+        conn_send_pktstr(&gdbstub->priv->conn, packet_str);
     }
-    conn_send_pktstr(&gdbstub->priv->conn, packet_str);
     free(mval);
 }
 
@@ -448,14 +447,10 @@ static void process_mem_write(gdbstub_t *gdbstub, char *payload, void *args)
     uint8_t *mval = malloc(mlen);
     str_to_hex(content, mval, mlen);
     int ret = gdbstub->ops->write_mem(args, maddr, mlen, mval);
-
-    if (!ret) {
+    if (ret)
+        send_errno(gdbstub, ret);
+    else
         conn_send_pktstr(&gdbstub->priv->conn, "OK");
-    } else {
-        char packet_str[MAX_SEND_PACKET_SIZE];
-        sprintf(packet_str, "E%d", ret);
-        conn_send_pktstr(&gdbstub->priv->conn, packet_str);
-    }
     free(mval);
 }
 
@@ -695,15 +690,12 @@ static gdb_event_t process_vpacket(gdbstub_t *gdbstub, char *payload)
 /* Reply to a Z/z packet: OK, empty for an unsupported type, or an error */
 static void send_bp_reply(gdbstub_t *gdbstub, int ret)
 {
-    char packet_str[32];
-
     if (ret == 0)
-        strcpy(packet_str, "OK");
+        conn_send_pktstr(&gdbstub->priv->conn, "OK");
     else if (ret == ENOTSUP)
-        packet_str[0] = 0;
+        conn_send_pktstr(&gdbstub->priv->conn, "");
     else
-        sprintf(packet_str, "E%d", ret);
-    conn_send_pktstr(&gdbstub->priv->conn, packet_str);
+        send_errno(gdbstub, ret);
 }
 
 /* Watchpoints are only usable when the target can report a hit, so treat

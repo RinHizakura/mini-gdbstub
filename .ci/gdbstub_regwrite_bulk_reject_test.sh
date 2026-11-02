@@ -2,7 +2,7 @@
 
 # GDB Stub Bulk Register Reject Test
 #
-# Tests bulk register write rejection (G packet with wrong length -> E22).
+# Tests bulk register write rejection (G packet with wrong length -> E16).
 #
 # Usage:
 #   ARCH=rv64 .ci/gdbstub_regwrite_bulk_reject_test.sh
@@ -34,7 +34,7 @@ continue
 # Read all registers via 'g' packet (baseline)
 maintenance packet g
 
-# Send G packet with wrong length (should get E22)
+# Send G packet with wrong length (should get E16)
 maintenance packet G00
 
 # Read registers again to confirm state unchanged
@@ -48,7 +48,7 @@ EOF
 
     local test_ok=true
 
-    # Wrong-length G packet should return an error (E22 = EINVAL)
+    # Wrong-length G packet should return an error (E16 = EINVAL in hex)
     if grep -q 'received: "E' "$TMPFILE"; then
         local err_response
         err_response=$(grep 'received: "E' "$TMPFILE" | head -1 | sed 's/.*received: "\(E[0-9]*\)".*/\1/')
