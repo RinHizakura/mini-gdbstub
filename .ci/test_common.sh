@@ -39,7 +39,7 @@ init_test()
     register_cleanup "$cleanup_func"
 }
 GDB_PORT="${GDB_PORT:-1234}"
-EMUDIR="build/emu"
+EMUDIR="build/emu/$ARCH"
 TEST_NAME="emu_test"
 TEST_OBJ="$EMUDIR/$TEST_NAME.obj"
 TEST_BIN="$EMUDIR/$TEST_NAME.bin"

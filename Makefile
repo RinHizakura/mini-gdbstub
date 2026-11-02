@@ -4,7 +4,9 @@ CURDIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 
 O ?= build
 OUT := $(O)
-EMU_OUT := $(abspath $(OUT)/emu)
+# One output directory per architecture: the emulator objects depend on
+# ARCH through -DRV32, so switching ARCH must not reuse them
+EMU_OUT = $(abspath $(OUT)/emu/$(ARCH))
 
 LIBGDBSTUB = $(OUT)/libgdbstub.a
 SHELL_HACK := $(shell mkdir -p $(OUT))
@@ -86,7 +88,7 @@ check: $(TEST_PKTBUF)
 	$(TEST_PKTBUF)
 
 clean:
-	$(MAKE) -C emu clean O=$(EMU_OUT)
+	$(RM) -r $(OUT)/emu
 	$(RM) $(LIB_OBJ)
 	$(RM) $(LIBGDBSTUB) $(TEST_PKTBUF)
 	$(RM) $(OUT)/*.d
