@@ -98,20 +98,24 @@ static inline int opcode_3(struct emu *emu, inst_t *inst)
     uint64_t value;
     uint64_t imm = (int32_t) (inst->inst & 0xfff00000) >> 20;
     uint64_t addr = emu->x[inst->rs1] + imm;
+    size_t len = 1 << (inst->funct3 & 3); /* b, h, w, d */
     uint8_t *ptr = emu->m.mem + addr;
+
+    if (addr > MEM_SIZE - len)
+        return -1;
 
     switch (inst->funct3) {
     case 0x2:
         // lw
         read_len(32, ptr, value);
         emu->x[inst->rd] = value;
-        emu_check_wp(emu, addr, 4, false);
+        emu_check_wp(emu, addr, len, false);
         return 0;
     case 0x3:
         // ld
         read_len(64, ptr, value);
         emu->x[inst->rd] = value;
-        emu_check_wp(emu, addr, 8, false);
+        emu_check_wp(emu, addr, len, false);
         return 0;
     default:
         break;
@@ -170,23 +174,27 @@ static inline int opcode_23(struct emu *emu, inst_t *inst)
     uint64_t imm = (((int32_t) (inst->inst & 0xfe000000) >> 20) |
                     (int32_t) ((inst->inst >> 7) & 0x1f));
     uint64_t addr = emu->x[inst->rs1] + imm;
+    size_t len = 1 << (inst->funct3 & 3); /* b, h, w, d */
     uint8_t *ptr = emu->m.mem + addr;
+
+    if (addr > MEM_SIZE - len)
+        return -1;
 
     switch (inst->funct3) {
     case 0x0:
         // sb
         write_len(8, ptr, emu->x[inst->rs2]);
-        emu_check_wp(emu, addr, 1, true);
+        emu_check_wp(emu, addr, len, true);
         return 0;
     case 0x2:
         // sw
         write_len(32, ptr, emu->x[inst->rs2]);
-        emu_check_wp(emu, addr, 4, true);
+        emu_check_wp(emu, addr, len, true);
         return 0;
     case 0x3:
         // sd
         write_len(64, ptr, emu->x[inst->rs2]);
-        emu_check_wp(emu, addr, 8, true);
+        emu_check_wp(emu, addr, len, true);
         return 0;
     default:
         break;
@@ -408,9 +416,8 @@ static size_t emu_get_reg_bytes(int regno __attribute__((unused)))
 static int emu_read_reg(void *args, int regno, void *reg_value)
 {
     struct emu *emu = (struct emu *) args;
-    if (regno > 32) {
+    if (regno < 0 || regno > 32)
         return EFAULT;
-    }
 
     if (regno == 32) {
         memcpy(reg_value, &emu->pc, REGSZ);
@@ -424,9 +431,8 @@ static int emu_write_reg(void *args, int regno, void *data)
 {
     struct emu *emu = (struct emu *) args;
 
-    if (regno > 32) {
+    if (regno < 0 || regno > 32)
         return EFAULT;
-    }
 
     if (regno == 32) {
         memcpy(&emu->pc, data, REGSZ);
@@ -439,9 +445,8 @@ static int emu_write_reg(void *args, int regno, void *data)
 static int emu_read_mem(void *args, size_t addr, size_t len, void *val)
 {
     struct emu *emu = (struct emu *) args;
-    if (addr + len > MEM_SIZE) {
+    if (addr > MEM_SIZE || len > MEM_SIZE - addr)
         return EFAULT;
-    }
     memcpy(val, (void *) emu->m.mem + addr, len);
     return 0;
 }
@@ -449,9 +454,8 @@ static int emu_read_mem(void *args, size_t addr, size_t len, void *val)
 static int emu_write_mem(void *args, size_t addr, size_t len, void *val)
 {
     struct emu *emu = (struct emu *) args;
-    if (addr + len > MEM_SIZE) {
+    if (addr > MEM_SIZE || len > MEM_SIZE - addr)
         return EFAULT;
-    }
     memcpy((void *) emu->m.mem + addr, val, len);
     return 0;
 }
