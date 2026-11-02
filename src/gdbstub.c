@@ -203,7 +203,6 @@ priv_fail:
 
 #define SEND_ERR(gdbstub, err) conn_send_pktstr(&gdbstub->priv->conn, err)
 #define SEND_EPERM(gdbstub) SEND_ERR(gdbstub, "E01")
-#define SEND_EINVAL(gdbstub) SEND_ERR(gdbstub, "E22")
 
 static gdb_event_t process_cont(gdbstub_t *gdbstub)
 {
@@ -693,6 +692,27 @@ static gdb_event_t process_vpacket(gdbstub_t *gdbstub, char *payload)
     return event;
 }
 
+/* Reply to a Z/z packet: OK, empty for an unsupported type, or an error */
+static void send_bp_reply(gdbstub_t *gdbstub, int ret)
+{
+    char packet_str[32];
+
+    if (ret == 0)
+        strcpy(packet_str, "OK");
+    else if (ret == ENOTSUP)
+        packet_str[0] = 0;
+    else
+        sprintf(packet_str, "E%d", ret);
+    conn_send_pktstr(&gdbstub->priv->conn, packet_str);
+}
+
+/* Watchpoints are only usable when the target can report a hit, so treat
+ * Z2-Z4 as unsupported for a target without wp_hit. */
+static bool bp_type_supported(gdbstub_t *gdbstub, size_t type)
+{
+    return type < WP_WRITE || gdbstub->ops->wp_hit != NULL;
+}
+
 static void process_del_break_points(gdbstub_t *gdbstub,
                                      char *payload,
                                      void *args)
@@ -704,11 +724,10 @@ static void process_del_break_points(gdbstub_t *gdbstub,
     printf("remove breakpoints = %zx %zx %zx\n", type, addr, kind);
 #endif
 
-    bool ret = gdbstub->ops->del_bp(args, addr, type);
-    if (ret)
-        conn_send_pktstr(&gdbstub->priv->conn, "OK");
-    else
-        SEND_EINVAL(gdbstub);
+    int ret = bp_type_supported(gdbstub, type)
+                  ? gdbstub->ops->del_bp(args, addr, kind, type)
+                  : ENOTSUP;
+    send_bp_reply(gdbstub, ret);
 }
 
 static void process_set_break_points(gdbstub_t *gdbstub,
@@ -722,11 +741,10 @@ static void process_set_break_points(gdbstub_t *gdbstub,
     printf("set breakpoints = %zx %zx %zx\n", type, addr, kind);
 #endif
 
-    bool ret = gdbstub->ops->set_bp(args, addr, type);
-    if (ret)
-        conn_send_pktstr(&gdbstub->priv->conn, "OK");
-    else
-        SEND_EINVAL(gdbstub);
+    int ret = bp_type_supported(gdbstub, type)
+                  ? gdbstub->ops->set_bp(args, addr, kind, type)
+                  : ENOTSUP;
+    send_bp_reply(gdbstub, ret);
 }
 
 static void process_set_cpu(gdbstub_t *gdbstub, char *payload, void *args)
@@ -904,10 +922,24 @@ static gdb_action_t gdbstub_handle_event(gdbstub_t *gdbstub,
     return act;
 }
 
-static void gdbstub_act_resume(gdbstub_t *gdbstub)
+static void gdbstub_act_resume(gdbstub_t *gdbstub, void *args)
 {
-    char packet_str[32];
-    sprintf(packet_str, "S%02x", GDB_SIGNAL_TRAP);
+    char packet_str[64];
+    size_t addr;
+    bp_type_t type;
+
+    /* GDB only treats a stop as a watchpoint hit when the stop reply
+     * carries the triggered address, so ask the target first. */
+    if (gdbstub->ops->wp_hit != NULL &&
+        gdbstub->ops->wp_hit(args, &addr, &type)) {
+        const char *reason = type == WP_READ     ? "rwatch"
+                             : type == WP_ACCESS ? "awatch"
+                                                 : "watch";
+        snprintf(packet_str, sizeof(packet_str), "T%02x%s:%zx;",
+                 GDB_SIGNAL_TRAP, reason, addr);
+    } else {
+        snprintf(packet_str, sizeof(packet_str), "S%02x", GDB_SIGNAL_TRAP);
+    }
     conn_send_pktstr(&gdbstub->priv->conn, packet_str);
 }
 
@@ -977,7 +1009,7 @@ bool gdbstub_run(gdbstub_t *gdbstub, void *args)
         gdb_action_t act = gdbstub_handle_event(gdbstub, event, args);
         switch (act) {
         case ACT_RESUME:
-            gdbstub_act_resume(gdbstub);
+            gdbstub_act_resume(gdbstub, args);
             break;
         case ACT_SHUTDOWN:
             return true;

@@ -34,8 +34,9 @@ Method         | Description
 `write_reg`    | Write value `value` to the register specified by `regno`. Return zero if the operation success, otherwise return an errno for the corresponding error.
 `read_mem`     | Read the memory according to the address specified by `addr` with size `len` to the buffer `*val`. Return zero if the operation success, otherwise return an errno for the corresponding error.
 `write_mem`    | Write data in the buffer `val` with size `len` to the memory which address is specified by `addr`. Return zero if the operation success, otherwise return an errno for the corresponding error.
-`set_bp`       | Set type `type` breakpoint on the address specified by `addr`. Return true if we set the breakpoint successfully, otherwise return false.
-`del_bp`       | Delete type `type` breakpoint on the address specified by `addr`. Return true if we delete the breakpoint successfully, otherwise return false.
+`set_bp`       | Set type `type` breakpoint or watchpoint on the address specified by `addr`. For watchpoints, `len` is the size of the watched region in bytes; for breakpoints it is the instruction length reported by GDB. Return zero if the operation success, `ENOTSUP` if the type is not supported by the target, otherwise return an errno for the corresponding error.
+`del_bp`       | Delete type `type` breakpoint or watchpoint on the address specified by `addr`. Return zero if the operation success, `ENOTSUP` if the type is not supported by the target, otherwise return an errno for the corresponding error.
+`wp_hit`       | Report whether the last `cont` or `stepi` stopped because a watchpoint triggered. If so, store its address and type to `*addr` and `*type` and return true. A target without this method is treated as not supporting watchpoints, and `set_bp` will never be called with a watchpoint type.
 `on_interrupt` | Do something when receiving interrupt from GDB client. This method will run concurrently with `cont`, so you should be careful if there're shared data between them. You will need a lock or something similar to avoid data race.
 `set_cpu`      | Set the debug target CPU to `cpuid`.
 `get_cpu`      | Get the current debug target CPU `cpuid` as return value.
@@ -49,8 +50,9 @@ struct target_ops {
     int (*write_reg)(void *args, int regno, void* value);
     int (*read_mem)(void *args, size_t addr, size_t len, void *val);
     int (*write_mem)(void *args, size_t addr, size_t len, void *val);
-    bool (*set_bp)(void *args, size_t addr, bp_type_t type);
-    bool (*del_bp)(void *args, size_t addr, bp_type_t type);
+    int (*set_bp)(void *args, size_t addr, size_t len, bp_type_t type);
+    int (*del_bp)(void *args, size_t addr, size_t len, bp_type_t type);
+    bool (*wp_hit)(void *args, size_t *addr, bp_type_t *type);
     void (*on_interrupt)(void *args);
 
     void (*set_cpu)(void *args, int cpuid);
@@ -71,12 +73,17 @@ typedef enum {
 } gdb_action_t;
 ```
 
-For `set_bp` and `del_bp`, the type of breakpoint which should be set or deleted is described
-in the type `bp_type_t`. In fact, its value will always be `BP_SOFTWARE` currently.
+For `set_bp` and `del_bp`, the type of breakpoint or watchpoint which should be set or deleted
+is described in the type `bp_type_t`. The values follow the GDB `Z` packet types: `Z0` and `Z1`
+are breakpoints, `Z2` to `Z4` are write, read and access watchpoints.
 
 ```c
 typedef enum {
     BP_SOFTWARE = 0,
+    BP_HARDWARE = 1,
+    WP_WRITE = 2,
+    WP_READ = 3,
+    WP_ACCESS = 4,
 } bp_type_t;
 ```
 

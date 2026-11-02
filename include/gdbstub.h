@@ -25,8 +25,13 @@ typedef enum {
     ACT_SHUTDOWN,
 } gdb_action_t;
 
+/* Z-packet types: Z0/Z1 are breakpoints, Z2-Z4 are watchpoints */
 typedef enum {
     BP_SOFTWARE = 0,
+    BP_HARDWARE = 1,
+    WP_WRITE = 2,
+    WP_READ = 3,
+    WP_ACCESS = 4,
 } bp_type_t;
 
 struct target_ops {
@@ -37,8 +42,9 @@ struct target_ops {
     int (*write_reg)(void *args, int regno, void *value);
     int (*read_mem)(void *args, size_t addr, size_t len, void *val);
     int (*write_mem)(void *args, size_t addr, size_t len, void *val);
-    bool (*set_bp)(void *args, size_t addr, bp_type_t type);
-    bool (*del_bp)(void *args, size_t addr, bp_type_t type);
+    int (*set_bp)(void *args, size_t addr, size_t len, bp_type_t type);
+    int (*del_bp)(void *args, size_t addr, size_t len, bp_type_t type);
+    bool (*wp_hit)(void *args, size_t *addr, bp_type_t *type);
     void (*on_interrupt)(void *args);
 
     void (*set_cpu)(void *args, int cpuid);

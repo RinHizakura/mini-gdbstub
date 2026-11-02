@@ -41,6 +41,13 @@ struct emu {
     bool bp_is_set;
     uint64_t bp_addr;
 
+    /* A single watchpoint; wp_hit is raised by the access that triggers it */
+    bool wp_is_set;
+    bool wp_hit;
+    uint64_t wp_addr;
+    size_t wp_len;
+    bp_type_t wp_type;
+
     bool halt;
 
     gdbstub_t gdbstub;
@@ -61,6 +68,21 @@ static inline bool emu_is_halt(struct emu *emu)
     return __atomic_load_n(&emu->halt, __ATOMIC_RELAXED);
 }
 
+static inline void emu_check_wp(struct emu *emu,
+                                uint64_t addr,
+                                size_t len,
+                                bool is_write)
+{
+    if (!emu->wp_is_set)
+        return;
+    if (emu->wp_type == WP_WRITE && !is_write)
+        return;
+    if (emu->wp_type == WP_READ && is_write)
+        return;
+    if (addr < emu->wp_addr + emu->wp_len && emu->wp_addr < addr + len)
+        emu->wp_hit = true;
+}
+
 typedef struct inst {
     uint64_t inst;
 
@@ -73,22 +95,23 @@ typedef struct inst {
 
 static inline int opcode_3(struct emu *emu, inst_t *inst)
 {
-    uint8_t *ptr;
     uint64_t value;
     uint64_t imm = (int32_t) (inst->inst & 0xfff00000) >> 20;
+    uint64_t addr = emu->x[inst->rs1] + imm;
+    uint8_t *ptr = emu->m.mem + addr;
 
     switch (inst->funct3) {
     case 0x2:
         // lw
-        ptr = emu->m.mem + emu->x[inst->rs1] + imm;
         read_len(32, ptr, value);
         emu->x[inst->rd] = value;
+        emu_check_wp(emu, addr, 4, false);
         return 0;
     case 0x3:
         // ld
-        ptr = emu->m.mem + emu->x[inst->rs1] + imm;
         read_len(64, ptr, value);
         emu->x[inst->rd] = value;
+        emu_check_wp(emu, addr, 8, false);
         return 0;
     default:
         break;
@@ -144,25 +167,26 @@ static inline int opcode_1b(struct emu *emu, inst_t *inst)
 
 static inline int opcode_23(struct emu *emu, inst_t *inst)
 {
-    uint8_t *ptr;
     uint64_t imm = (((int32_t) (inst->inst & 0xfe000000) >> 20) |
                     (int32_t) ((inst->inst >> 7) & 0x1f));
+    uint64_t addr = emu->x[inst->rs1] + imm;
+    uint8_t *ptr = emu->m.mem + addr;
 
     switch (inst->funct3) {
     case 0x0:
         // sb
-        ptr = emu->m.mem + emu->x[inst->rs1] + imm;
         write_len(8, ptr, emu->x[inst->rs2]);
+        emu_check_wp(emu, addr, 1, true);
         return 0;
     case 0x2:
         // sw
-        ptr = emu->m.mem + emu->x[inst->rs1] + imm;
         write_len(32, ptr, emu->x[inst->rs2]);
+        emu_check_wp(emu, addr, 4, true);
         return 0;
     case 0x3:
         // sd
-        ptr = emu->m.mem + emu->x[inst->rs1] + imm;
         write_len(64, ptr, emu->x[inst->rs2]);
+        emu_check_wp(emu, addr, 8, true);
         return 0;
     default:
         break;
@@ -439,14 +463,15 @@ static gdb_action_t emu_cont(void *args)
     uint8_t *tohost_addr = emu->m.mem + TOHOST_ADDR;
 
     emu_start_run(emu);
+    emu->wp_hit = false;
     while (emu->pc < emu->m.code_size && emu->pc != emu->bp_addr &&
-           !emu_is_halt(emu)) {
+           !emu_is_halt(emu) && !emu->wp_hit) {
         uint32_t inst;
         uint8_t value;
         emu_read_mem(args, emu->pc, 4, &inst);
         emu->pc += 4;
         ret = emu_exec(emu, inst);
-        if (ret < 0)
+        if (ret < 0 || emu->wp_hit)
             break;
 
         /* We assume the binary that run on this emulator will
@@ -465,6 +490,7 @@ static gdb_action_t emu_stepi(void *args)
     struct emu *emu = (struct emu *) args;
 
     emu_start_run(emu);
+    emu->wp_hit = false;
     if (emu->pc < emu->m.code_size) {
         uint32_t inst;
         emu_read_mem(args, emu->pc, 4, &inst);
@@ -475,27 +501,68 @@ static gdb_action_t emu_stepi(void *args)
     return ACT_RESUME;
 }
 
-static bool emu_set_bp(void *args, size_t addr, bp_type_t type)
+static int emu_set_bp(void *args, size_t addr, size_t len, bp_type_t type)
 {
     struct emu *emu = (struct emu *) args;
-    if (type != BP_SOFTWARE || emu->bp_is_set)
-        return false;
 
-    emu->bp_is_set = true;
-    emu->bp_addr = addr;
-    return true;
+    switch (type) {
+    case BP_SOFTWARE:
+    case BP_HARDWARE:
+        /* Both kinds share the single breakpoint slot */
+        if (emu->bp_is_set)
+            return EBUSY;
+        emu->bp_is_set = true;
+        emu->bp_addr = addr;
+        return 0;
+    case WP_WRITE:
+    case WP_READ:
+    case WP_ACCESS:
+        if (emu->wp_is_set)
+            return EBUSY;
+        if (len == 0 || addr + len > MEM_SIZE)
+            return EFAULT;
+        emu->wp_is_set = true;
+        emu->wp_addr = addr;
+        emu->wp_len = len;
+        emu->wp_type = type;
+        return 0;
+    default:
+        return ENOTSUP;
+    }
 }
 
-static bool emu_del_bp(void *args, size_t addr, bp_type_t type)
+static int emu_del_bp(void *args, size_t addr, size_t len, bp_type_t type)
 {
     struct emu *emu = (struct emu *) args;
+    (void) len;
 
     // It's fine when there's no matching breakpoint, just doing nothing
-    if (type != BP_SOFTWARE || !emu->bp_is_set || emu->bp_addr != addr)
-        return true;
+    switch (type) {
+    case BP_SOFTWARE:
+    case BP_HARDWARE:
+        if (emu->bp_is_set && emu->bp_addr == addr) {
+            emu->bp_is_set = false;
+            emu->bp_addr = -1;
+        }
+        return 0;
+    case WP_WRITE:
+    case WP_READ:
+    case WP_ACCESS:
+        if (emu->wp_is_set && emu->wp_addr == addr)
+            emu->wp_is_set = false;
+        return 0;
+    default:
+        return ENOTSUP;
+    }
+}
 
-    emu->bp_is_set = false;
-    emu->bp_addr = 0;
+static bool emu_wp_hit(void *args, size_t *addr, bp_type_t *type)
+{
+    struct emu *emu = (struct emu *) args;
+    if (!emu->wp_hit)
+        return false;
+    *addr = emu->wp_addr;
+    *type = emu->wp_type;
     return true;
 }
 
@@ -515,6 +582,7 @@ struct target_ops emu_ops = {
     .stepi = emu_stepi,
     .set_bp = emu_set_bp,
     .del_bp = emu_del_bp,
+    .wp_hit = emu_wp_hit,
     .on_interrupt = emu_on_interrupt,
 };
 
