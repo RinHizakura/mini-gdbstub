@@ -18,6 +18,9 @@
 /* Poll timeout for reader thread (milliseconds) */
 #define READER_POLL_TIMEOUT_MS 100
 
+/* Each CPU takes 5 characters ("%04d,") in the fThreadInfo reply */
+#define MAX_SMP ((MAX_DATA_PAYLOAD - 1) / 5)
+
 struct gdbstub_private {
     conn_t conn;
     regbuf_t regbuf;
@@ -160,6 +163,11 @@ bool gdbstub_init(gdbstub_t *gdbstub,
     gdbstub->priv->total_reg_bytes = 0;
     for (int i = 0; i < arch.reg_num; i++)
         gdbstub->priv->total_reg_bytes += ops->get_reg_bytes(i);
+
+    /* The g reply and the fThreadInfo list each have to fit in one packet */
+    if (gdbstub->priv->total_reg_bytes * 2 > MAX_DATA_PAYLOAD ||
+        arch.smp > MAX_SMP)
+        goto priv_fail;
 
     /* Parse address string (format: "host:port" or "path") */
     addr_str = strdup(s);
@@ -586,21 +594,12 @@ static void process_query(gdbstub_t *gdbstub, char *payload, void *args)
         /* Assume at least 1 CPU if user didn't specific
          * the CPU counts */
         int smp = gdbstub->arch.smp ? gdbstub->arch.smp : 1;
-        char *ptr;
-        char cpuid_str[6];
+        char *ptr = packet_str;
 
-        /* Make assumption on the CPU counts, so
-         * that we can use the buffer very simply. */
-        assert(smp < 10000);
-
-        packet_str[0] = 'm';
-        ptr = packet_str + 1;
-        for (int cpuid = 0; cpuid < smp; cpuid++) {
-            sprintf(cpuid_str, "%04d,", cpuid);
-            memcpy(ptr, cpuid_str, 5);
-            ptr += 5;
-        }
-        *ptr = 0;
+        *ptr++ = 'm';
+        for (int cpuid = 0; cpuid < smp; cpuid++)
+            ptr += snprintf(ptr, packet_str + sizeof(packet_str) - ptr, "%04d,",
+                            cpuid);
         conn_send_pktstr(&gdbstub->priv->conn, packet_str);
     } else if (!strcmp(name, "sThreadInfo")) {
         conn_send_pktstr(&gdbstub->priv->conn, "l");
