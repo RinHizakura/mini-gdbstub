@@ -322,14 +322,19 @@ find_riscv_gdb()
     return 1
 }
 
-# Wait for emulator to be ready (listening on port)
+# Wait for emulator to be ready (listening on port).
+# Look for a LISTEN socket in /proc/net/tcp instead of connecting: the stub
+# accepts a single client, so a probe connection would be taken as GDB
+# attaching and then disconnecting.
 wait_for_port()
 {
     local port="$1"
     local timeout="${2:-10}"
-    local elapsed=0
+    local elapsed=0 hex_port
+    printf -v hex_port '%04X' "$port"
 
-    while ! nc -z 127.0.0.1 "$port" 2> /dev/null; do
+    while ! grep -qsE "^ *[0-9]+: [0-9A-F]+:${hex_port} [0-9A-F]+:[0-9A-F]+ 0A " \
+        /proc/net/tcp /proc/net/tcp6; do
         sleep 0.1
         elapsed=$((elapsed + 1))
         if [[ $elapsed -ge $((timeout * 10)) ]]; then

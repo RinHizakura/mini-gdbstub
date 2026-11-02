@@ -114,8 +114,7 @@ run_gdb_test_script()
     register_pid $emu_pid
 
     # Wait for emulator to be ready
-    sleep 0.5
-    if ! kill -0 $emu_pid 2> /dev/null; then
+    if ! wait_for_port "$GDB_PORT" 5 || ! kill -0 $emu_pid 2> /dev/null; then
         test_fail "$testcase" "Emulator failed to start"
         return 1
     fi

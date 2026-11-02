@@ -68,9 +68,7 @@ run_malformed_test()
     local emu_pid=$!
     register_pid $emu_pid
 
-    # Do not probe the port: the stub accepts a single connection
-    sleep 0.5
-    if ! kill -0 $emu_pid 2> /dev/null; then
+    if ! wait_for_port "$GDB_PORT" 5 || ! kill -0 $emu_pid 2> /dev/null; then
         test_fail "$TESTCASE" "Emulator failed to start"
         return 1
     fi
