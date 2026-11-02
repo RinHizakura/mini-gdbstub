@@ -150,7 +150,7 @@ run_arch_tests()
     fi
 
     # Run watchpoint test
-    print_step "Running watchpoint test..."
+    print_step "Running hardware breakpoint and watchpoint test..."
     if ARCH="$arch" "$SCRIPT_DIR/gdbstub_wp_test.sh"; then
         ((passed++))
     else

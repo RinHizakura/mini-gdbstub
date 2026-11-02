@@ -95,7 +95,7 @@ jobs:
           export CROSS_COMPILE=${{ matrix.cross_compile }}
           ARCH=${{ matrix.arch }} .ci/gdbstub_bp_test.sh
 
-      - name: Run watchpoint test
+      - name: Run hardware breakpoint and watchpoint test
         id: test-watchpoint
         continue-on-error: true
         run: |
@@ -160,7 +160,7 @@ jobs:
           echo "|------|--------|" >> $GITHUB_STEP_SUMMARY
           echo "| Continue Test | ${{ steps.test-continue.outcome == 'success' && 'PASSED' || 'FAILED' }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Breakpoint Test | ${{ steps.test-breakpoint.outcome == 'success' && 'PASSED' || 'FAILED' }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Watchpoint Test | ${{ steps.test-watchpoint.outcome == 'success' && 'PASSED' || 'FAILED' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| HW Breakpoint + Watchpoint Test | ${{ steps.test-watchpoint.outcome == 'success' && 'PASSED' || 'FAILED' }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Malformed Packet Test | ${{ steps.test-malformed.outcome == 'success' && 'PASSED' || 'FAILED' }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Single Register Write | ${{ steps.test-regwrite-single.outcome == 'success' && 'PASSED' || 'FAILED' }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Bulk Register Reject | ${{ steps.test-regwrite-bulk-reject.outcome == 'success' && 'PASSED' || 'FAILED' }} |" >> $GITHUB_STEP_SUMMARY

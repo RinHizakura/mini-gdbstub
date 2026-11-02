@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 
-# GDB Stub Watchpoint Test
+# GDB Stub Hardware Breakpoint and Watchpoint Test
 #
-# Tests GDB watchpoint functionality: set a write watchpoint on the tohost
-# address, continue, and verify GDB attributes the stop to the watchpoint by
-# printing the old and new values.
+# Tests the Z1 and Z2 packets: set a hardware breakpoint on 'add' and hit
+# it, then set a write watchpoint on the tohost address, continue, and
+# verify GDB attributes the stop to the watchpoint by printing the old and
+# new values.
 #
 # Usage:
 #   ARCH=rv64 .ci/gdbstub_wp_test.sh
@@ -17,7 +18,7 @@
 #   GDB_PORT        Port for GDB connection (default: 1234)
 #
 
-TESTCASE="GDB Watchpoint Test"
+TESTCASE="GDB Hardware Breakpoint and Watchpoint Test"
 source "$(dirname "$0")/test_common.sh"
 TMPFILE=$(create_temp_file "gdbstub_wp_test")
 
@@ -29,7 +30,12 @@ run_watchpoint_test()
     gdb_script_header > "$TMPFILE.gdb"
     cat >> "$TMPFILE.gdb" << 'EOF2'
 
-# Watch the tohost byte (0x1000 - 4) that main writes before exiting
+# Hardware breakpoint on 'add' (Z1)
+hbreak add
+continue
+printf "Hit hardware breakpoint, PC = %p\n", $pc
+
+# Watch the tohost byte (0x1000 - 4) that main writes before exiting (Z2)
 watch *(char *) 0xffc
 printf "Watchpoint set\n"
 
@@ -44,8 +50,15 @@ EOF2
 
     run_gdb_test_script "$TMPFILE.gdb" "$TESTCASE"
 
+    local hwbreak_hit=false
     local watchpoint_set=false
     local watchpoint_hit=false
+
+    if grep -q "Hardware assisted breakpoint [0-9]* at" "$TMPFILE" &&
+        grep -qE "Breakpoint [0-9]+, add \(" "$TMPFILE"; then
+        hwbreak_hit=true
+        print_info "Hardware breakpoint was set and hit"
+    fi
 
     if grep -q "Hardware watchpoint [0-9]*: \*(char \*) 0xffc" "$TMPFILE"; then
         watchpoint_set=true
@@ -58,9 +71,15 @@ EOF2
         print_info "Watchpoint hit reported with old and new values"
     fi
 
-    if [[ "$watchpoint_set" == "true" ]] && [[ "$watchpoint_hit" == "true" ]]; then
+    if [[ "$hwbreak_hit" == "true" ]] && [[ "$watchpoint_set" == "true" ]] &&
+        [[ "$watchpoint_hit" == "true" ]]; then
         test_pass "$TESTCASE ($ARCH)"
         return 0
+    elif [[ "$hwbreak_hit" == "false" ]]; then
+        test_fail "$TESTCASE" "Hardware breakpoint was not set or not hit"
+        print_error "GDB output:"
+        cat "$TMPFILE" >&2
+        return 1
     elif [[ "$watchpoint_set" == "false" ]]; then
         test_fail "$TESTCASE" "Hardware watchpoint was not set"
         print_error "GDB output:"
