@@ -530,25 +530,33 @@ void process_xfer(gdbstub_t *gdbstub, char *s)
     printf("xfer = %s %s\n", name, args);
 #endif
     if (!strcmp(name, "features") && gdbstub->arch.target_desc != NULL) {
-        /* Check the args */
-        char *action = strtok(args, ":");
-        assert(strcmp(action, "read") == 0);
+        /* qXfer:features:read:target.xml:offset,length */
+        char *action = args ? strtok(args, ":") : NULL;
         char *annex = strtok(NULL, ":");
-        assert(strcmp(annex, "target.xml") == 0);
+        char *range = strtok(NULL, ":");
+        if (!action || strcmp(action, "read") || !annex ||
+            strcmp(annex, "target.xml")) {
+            conn_send_pktstr(&gdbstub->priv->conn, "");
+            return;
+        }
+
+        int offset = 0, length = 0;
+        int total_len = strlen(gdbstub->arch.target_desc);
+        if (!range || sscanf(range, "%x,%x", &offset, &length) != 2 ||
+            offset < 0 || offset > total_len || length < 0) {
+            SEND_EINVAL(gdbstub);
+            return;
+        }
+
+        /* Clamp to what is left and to what fits after the 'm'/'l' marker */
+        int remaining = total_len - offset;
+        length = length < remaining ? length : remaining;
+        length = length < MAX_DATA_PAYLOAD - 1 ? length : MAX_DATA_PAYLOAD - 1;
 
         char buf[MAX_SEND_PACKET_SIZE];
-        int offset = 0, length = 0;
-        sscanf(strtok(NULL, ":"), "%x,%x", &offset, &length);
-
-        int total_len = strlen(gdbstub->arch.target_desc);
-        int payload_length =
-            MAX_DATA_PAYLOAD > length ? length : MAX_DATA_PAYLOAD;
-
-        // Determine if the remaining data fits within the buffer
-        buf[0] = (total_len - offset < payload_length) ? 'l' : 'm';
-        snprintf(buf + 1, payload_length, "%s",
-                 gdbstub->arch.target_desc + offset);
-
+        buf[0] = length < remaining ? 'm' : 'l';
+        memcpy(buf + 1, gdbstub->arch.target_desc + offset, length);
+        buf[length + 1] = '\0';
         conn_send_pktstr(&gdbstub->priv->conn, buf);
     } else {
         conn_send_pktstr(&gdbstub->priv->conn, "");
