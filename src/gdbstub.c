@@ -518,7 +518,7 @@ static void process_mem_xwrite(gdbstub_t *gdbstub,
 }
 
 
-void process_xfer(gdbstub_t *gdbstub, char *s)
+static void process_xfer(gdbstub_t *gdbstub, char *s)
 {
     char *name = s;
     char *args = strchr(s, ':');
