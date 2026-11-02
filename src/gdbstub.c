@@ -103,9 +103,8 @@ static void *socket_reader(void *arg)
         /* Check for interrupt character in the received data.
          * The interrupt char (0x03) can appear outside packet framing,
          * so we scan the raw buffer before packet assembly. */
-        uint8_t *buf_start = pktbuf.data + pktbuf.size - nread;
-        for (ssize_t i = 0; i < nread; i++) {
-            if (buf_start[i] == INTR_CHAR) {
+        for (int i = pktbuf.size - nread; i < pktbuf.size; i++) {
+            if (pktbuf_at(&pktbuf, i) == INTR_CHAR) {
                 /* Signal interrupt to main thread */
                 if (async_io_is_enable(priv) && gdbstub->ops->on_interrupt) {
                     gdbstub->ops->on_interrupt(priv->args);
