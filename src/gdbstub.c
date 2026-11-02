@@ -424,7 +424,9 @@ static void process_reg_write_one(gdbstub_t *gdbstub, char *payload, void *args)
 static void process_mem_read(gdbstub_t *gdbstub, char *payload, void *args)
 {
     size_t maddr, mlen;
-    if (sscanf(payload, "%zx,%zx", &maddr, &mlen) != 2) {
+    /* The hex-encoded reply has to fit in a single packet */
+    if (sscanf(payload, "%zx,%zx", &maddr, &mlen) != 2 ||
+        mlen > MAX_DATA_PAYLOAD / 2) {
         SEND_EINVAL(gdbstub);
         return;
     }
@@ -454,7 +456,8 @@ static void process_mem_write(gdbstub_t *gdbstub, char *payload, void *args)
     }
     *content = '\0';
     content++;
-    if (sscanf(payload, "%zx,%zx", &maddr, &mlen) != 2) {
+    if (sscanf(payload, "%zx,%zx", &maddr, &mlen) != 2 ||
+        strlen(content) != mlen * 2) {
         SEND_EINVAL(gdbstub);
         return;
     }
