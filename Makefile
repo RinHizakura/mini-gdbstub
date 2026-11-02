@@ -18,7 +18,7 @@ TEST_OBJ = $(EMU_OUT)/emu_test.obj
 TEST_BIN = $(EMU_OUT)/emu_test.bin
 
 vpath %.c $(sort $(dir $(LIBSRCS)))
-.PHONY: all debug clean
+.PHONY: all debug clean check
 
 all: CFLAGS += -O3
 all: LDFLAGS += -O3
@@ -76,10 +76,19 @@ run-gdb: build-emu
 		-ex "set debug remote 1"            \
 		-ex "target remote $(GDBSTUB_COMM)" \
 
+TEST_PKTBUF = $(OUT)/test_pktbuf
+$(TEST_PKTBUF): tests/test_pktbuf.c src/packet.c include/packet.h
+	$(CC) $(CFLAGS) -g -fsanitize=address,undefined \
+		-Wl,--wrap=realloc,--wrap=calloc \
+		tests/test_pktbuf.c src/packet.c -o $@
+
+check: $(TEST_PKTBUF)
+	$(TEST_PKTBUF)
+
 clean:
 	$(MAKE) -C emu clean O=$(EMU_OUT)
 	$(RM) $(LIB_OBJ)
-	$(RM) $(LIBGDBSTUB)
+	$(RM) $(LIBGDBSTUB) $(TEST_PKTBUF)
 	$(RM) $(OUT)/*.d
 
 -include $(OUT)/*.d
