@@ -267,7 +267,10 @@ static void process_reg_read_one(gdbstub_t *gdbstub, char *payload, void *args)
     char packet_str[MAX_SEND_PACKET_SIZE];
     int regno;
 
-    assert(sscanf(payload, "%x", &regno) == 1);
+    if (sscanf(payload, "%x", &regno) != 1) {
+        SEND_EINVAL(gdbstub);
+        return;
+    }
     size_t reg_sz = gdbstub->ops->get_reg_bytes(regno);
     void *reg_value = regbuf_get(&gdbstub->priv->regbuf, reg_sz);
 
@@ -387,16 +390,23 @@ static void process_reg_write_one(gdbstub_t *gdbstub, char *payload, void *args)
     int regno;
     char *regno_str = payload;
     char *data_str = strchr(payload, '=');
-    if (data_str) {
-        *data_str = '\0';
-        data_str++;
+    if (!data_str) {
+        SEND_EINVAL(gdbstub);
+        return;
     }
+    *data_str = '\0';
+    data_str++;
 
-    assert(sscanf(regno_str, "%x", &regno) == 1);
+    if (sscanf(regno_str, "%x", &regno) != 1) {
+        SEND_EINVAL(gdbstub);
+        return;
+    }
     size_t reg_sz = gdbstub->ops->get_reg_bytes(regno);
+    if (strlen(data_str) != reg_sz * 2) {
+        SEND_EINVAL(gdbstub);
+        return;
+    }
     void *data = regbuf_get(&gdbstub->priv->regbuf, reg_sz);
-
-    assert(strlen(data_str) == reg_sz * 2);
 
     str_to_hex(data_str, (uint8_t *) data, reg_sz);
 #ifdef DEBUG
@@ -414,9 +424,12 @@ static void process_reg_write_one(gdbstub_t *gdbstub, char *payload, void *args)
 static void process_mem_read(gdbstub_t *gdbstub, char *payload, void *args)
 {
     size_t maddr, mlen;
-    assert(sscanf(payload, "%lx,%lx", &maddr, &mlen) == 2);
+    if (sscanf(payload, "%zx,%zx", &maddr, &mlen) != 2) {
+        SEND_EINVAL(gdbstub);
+        return;
+    }
 #ifdef DEBUG
-    printf("mem read = addr %lx / len %lx\n", maddr, mlen);
+    printf("mem read = addr %zx / len %zx\n", maddr, mlen);
 #endif
     char packet_str[MAX_SEND_PACKET_SIZE];
 
@@ -435,13 +448,18 @@ static void process_mem_write(gdbstub_t *gdbstub, char *payload, void *args)
 {
     size_t maddr, mlen;
     char *content = strchr(payload, ':');
-    if (content) {
-        *content = '\0';
-        content++;
+    if (!content) {
+        SEND_EINVAL(gdbstub);
+        return;
     }
-    assert(sscanf(payload, "%lx,%lx", &maddr, &mlen) == 2);
+    *content = '\0';
+    content++;
+    if (sscanf(payload, "%zx,%zx", &maddr, &mlen) != 2) {
+        SEND_EINVAL(gdbstub);
+        return;
+    }
 #ifdef DEBUG
-    printf("mem write = addr %lx / len %lx\n", maddr, mlen);
+    printf("mem write = addr %zx / len %zx\n", maddr, mlen);
     printf("mem write = content %s\n", content);
 #endif
     uint8_t *mval = malloc(mlen);
@@ -461,14 +479,19 @@ static void process_mem_xwrite(gdbstub_t *gdbstub,
 {
     size_t maddr, mlen;
     char *content = strchr(payload, ':');
-    if (content) {
-        *content = '\0';
-        content++;
+    if (!content) {
+        SEND_EINVAL(gdbstub);
+        return;
     }
-    assert(sscanf(payload, "%lx,%lx", &maddr, &mlen) == 2);
-    assert(unescape(content, (char *) packet_end) == (int) mlen);
+    *content = '\0';
+    content++;
+    if (sscanf(payload, "%zx,%zx", &maddr, &mlen) != 2 ||
+        unescape(content, (char *) packet_end) != (int) mlen) {
+        SEND_EINVAL(gdbstub);
+        return;
+    }
 #ifdef DEBUG
-    printf("mem xwrite = addr %lx / len %lx\n", maddr, mlen);
+    printf("mem xwrite = addr %zx / len %zx\n", maddr, mlen);
     for (size_t i = 0; i < mlen; i++) {
         printf("\tmem xwrite, byte %ld: %x\n", i, content[i]);
     }
@@ -616,6 +639,11 @@ static inline gdb_event_t process_vcont(gdbstub_t *gdbstub, char *args)
 {
     gdb_event_t event = EVENT_NONE;
 
+    if (!args) {
+        SEND_EINVAL(gdbstub);
+        return event;
+    }
+
     switch (args[0]) {
     case 'c':
         if (gdbstub->ops->cont != NULL)
@@ -710,7 +738,10 @@ static void process_del_break_points(gdbstub_t *gdbstub,
                                      void *args)
 {
     size_t type, addr, kind;
-    assert(sscanf(payload, "%zx,%zx,%zx", &type, &addr, &kind) == 3);
+    if (sscanf(payload, "%zx,%zx,%zx", &type, &addr, &kind) != 3) {
+        SEND_EINVAL(gdbstub);
+        return;
+    }
 
 #ifdef DEBUG
     printf("remove breakpoints = %zx %zx %zx\n", type, addr, kind);
@@ -727,7 +758,10 @@ static void process_set_break_points(gdbstub_t *gdbstub,
                                      void *args)
 {
     size_t type, addr, kind;
-    assert(sscanf(payload, "%zx,%zx,%zx", &type, &addr, &kind) == 3);
+    if (sscanf(payload, "%zx,%zx,%zx", &type, &addr, &kind) != 3) {
+        SEND_EINVAL(gdbstub);
+        return;
+    }
 
 #ifdef DEBUG
     printf("set breakpoints = %zx %zx %zx\n", type, addr, kind);
@@ -745,7 +779,10 @@ static void process_set_cpu(gdbstub_t *gdbstub, char *payload, void *args)
     /* We don't support deprecated Hc packet, GDB
      * should send only send vCont;c and vCont;s here. */
     if (payload[0] == 'g') {
-        assert(sscanf(payload, "g%d", &cpuid) == 1);
+        if (sscanf(payload, "g%d", &cpuid) != 1) {
+            SEND_EINVAL(gdbstub);
+            return;
+        }
         gdbstub->ops->set_cpu(args, cpuid);
     }
     conn_send_pktstr(&gdbstub->priv->conn, "OK");
