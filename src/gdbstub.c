@@ -238,7 +238,9 @@ static gdb_event_t process_stepi(gdbstub_t *gdbstub)
 static void process_reg_read(gdbstub_t *gdbstub, void *args)
 {
     char packet_str[MAX_SEND_PACKET_SIZE];
+    size_t offset = 0;
 
+    packet_str[0] = '\0';
     for (int i = 0; i < gdbstub->arch.reg_num; i++) {
         size_t reg_sz = gdbstub->ops->get_reg_bytes(i);
         void *reg_value = regbuf_get(&gdbstub->priv->regbuf, reg_sz);
@@ -251,8 +253,8 @@ static void process_reg_read(gdbstub_t *gdbstub, void *args)
                reg_sz);
 #endif
         if (!ret) {
-            hex_to_str((uint8_t *) reg_value, &packet_str[i * reg_sz * 2],
-                       reg_sz);
+            hex_to_str((uint8_t *) reg_value, &packet_str[offset], reg_sz);
+            offset += reg_sz * 2;
         } else {
             snprintf(packet_str, sizeof(packet_str), "E%02x", ret & 0xff);
             break;
