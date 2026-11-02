@@ -502,8 +502,11 @@ static void process_mem_xwrite(gdbstub_t *gdbstub,
     }
 #endif
 
-    gdbstub->ops->write_mem(args, maddr, mlen, content);
-    conn_send_pktstr(&gdbstub->priv->conn, "OK");
+    int ret = gdbstub->ops->write_mem(args, maddr, mlen, content);
+    if (ret)
+        send_errno(gdbstub, ret);
+    else
+        conn_send_pktstr(&gdbstub->priv->conn, "OK");
 }
 
 
