@@ -133,10 +133,21 @@ static void test_wrap(pktbuf_t *b)
     assert(b->head == 8 && b->size == 0);
     assert(capacity(b) == cap); /* never grew */
 
-    /* INTR_CHAR scanning via pktbuf_at over the last nread bytes */
+    /* INTR_CHAR between packets counts, once per byte */
+    assert(b->interrupts == 0);
     feed(b, "\x03");
-    assert(pktbuf_at(b, b->size - 1) == INTR_CHAR);
-    assert(!pktbuf_is_complete(b)); /* reset head to 0 */
+    assert(!pktbuf_is_complete(b) && b->interrupts == 1); /* head reset to 0 */
+    feed(b, "\x03$c#63\x03\x03");
+    expect(b, "$c#63");
+    assert(!pktbuf_is_complete(b) && b->interrupts == 4);
+
+    /* INTR_CHAR inside a packet is an escaped '#', not an interrupt */
+    feed(b, "$X0,2:}\x03}\x03#4c");
+    expect(b, "$X0,2:}\x03}\x03#4c");
+    assert(b->interrupts == 4);
+    feed(b, "\x03");
+    assert(!pktbuf_is_complete(b) && b->interrupts == 5); /* head reset to 0 */
+    b->interrupts = 0;
 }
 
 /* Fill to exactly capacity, then deliver the rest so the buffer grows */

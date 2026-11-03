@@ -19,6 +19,7 @@ bool pktbuf_init(pktbuf_t *pktbuf)
 {
     pktbuf->cap = DEFAULT_CAP;
     pktbuf->data = calloc(1, CAPACITY(pktbuf) * sizeof(uint8_t));
+    pktbuf->interrupts = 0;
     pktbuf_clear(pktbuf);
 
     return pktbuf->data != NULL;
@@ -93,14 +94,26 @@ ssize_t pktbuf_fill_from_file(pktbuf_t *pktbuf, int fd)
     return nread;
 }
 
+/* 0x03 only means "interrupt" outside packet framing: inside an X packet it
+ * is the escaped form of '#'. Count it in the logical range [from, to). */
+static void pktbuf_count_interrupts(pktbuf_t *pktbuf, int from, int to)
+{
+    for (int i = from; i < to; i++) {
+        if (pktbuf_at(pktbuf, i) == INTR_CHAR)
+            pktbuf->interrupts++;
+    }
+}
+
 bool pktbuf_is_complete(pktbuf_t *pktbuf)
 {
     /* skip to the head of next packet */
     int head = pktbuf_find(pktbuf, 0, '$');
     if (head < 0) {
+        pktbuf_count_interrupts(pktbuf, 0, pktbuf->size);
         pktbuf_clear(pktbuf);
         return false;
     }
+    pktbuf_count_interrupts(pktbuf, 0, head);
     pktbuf_consume(pktbuf, head);
 
     /* check the end of the buffer */

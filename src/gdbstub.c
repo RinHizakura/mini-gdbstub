@@ -103,19 +103,6 @@ static void *socket_reader(void *arg)
             break;
         }
 
-        /* Check for interrupt character in the received data.
-         * The interrupt char (0x03) can appear outside packet framing,
-         * so we scan the raw buffer before packet assembly. */
-        for (int i = pktbuf.size - nread; i < pktbuf.size; i++) {
-            if (pktbuf_at(&pktbuf, i) == INTR_CHAR) {
-                /* Signal interrupt to main thread */
-                if (async_io_is_enable(priv) && gdbstub->ops->on_interrupt) {
-                    gdbstub->ops->on_interrupt(priv->args);
-                }
-                pktqueue_signal_interrupt(&priv->pktqueue);
-            }
-        }
-
         /* Process complete packets */
         while (pktbuf_is_complete(&pktbuf)) {
             packet_t *pkt = pktbuf_pop_packet(&pktbuf);
@@ -124,6 +111,14 @@ static void *socket_reader(void *arg)
              * retransmits after its timeout. */
             if (pkt && !pktqueue_push(&priv->pktqueue, pkt))
                 free(pkt);
+        }
+
+        /* Framing tallied any interrupt characters found between packets */
+        if (pktbuf.interrupts) {
+            pktbuf.interrupts = 0;
+            if (async_io_is_enable(priv) && gdbstub->ops->on_interrupt)
+                gdbstub->ops->on_interrupt(priv->args);
+            pktqueue_signal_interrupt(&priv->pktqueue);
         }
     }
 

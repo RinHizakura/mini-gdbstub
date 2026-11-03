@@ -19,10 +19,11 @@ typedef struct {
 /* A ring buffer for incoming packets: valid bytes live at logical offsets
  * [0, size), where logical offset i maps to data[(head + i) & mask]. */
 typedef struct {
-    int head;    /* physical index of logical offset 0 */
-    int size;    /* the size for all valid characters in data buffer */
-    int cap;     /* the capacity (1 << cap) of the data buffer */
-    int end_pos; /* logical end position of the first packet, -1 if none */
+    int head;       /* physical index of logical offset 0 */
+    int size;       /* the size for all valid characters in data buffer */
+    int cap;        /* the capacity (1 << cap) of the data buffer */
+    int end_pos;    /* logical end position of the first packet, -1 if none */
+    int interrupts; /* INTR_CHARs seen outside packet framing */
     uint8_t *data;
 } pktbuf_t;
 
