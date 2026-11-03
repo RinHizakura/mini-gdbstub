@@ -30,7 +30,8 @@ struct gdbstub_private {
     volatile bool thread_stop; /* Per-instance thread control */
     bool reader_running;       /* Explicit flag for thread state */
     bool async_io_enable;
-    bool interrupted; /* Ctrl-C arrived while the target was running */
+    bool interrupted;   /* Ctrl-C arrived while the target was running */
+    char last_stop[64]; /* most recent stop reply, replayed for '?' */
     void *args;
 
     /* Cached register size totals (computed once at init) */
@@ -230,10 +231,11 @@ static void send_stop_reply(gdbstub_t *gdbstub,
                             int sig,
                             const char *reason)
 {
-    char packet_str[64];
-    int n = snprintf(packet_str, sizeof(packet_str), "T%02x%s", sig, reason);
+    char *packet_str = gdbstub->priv->last_stop;
+    size_t size = sizeof(gdbstub->priv->last_stop);
+    int n = snprintf(packet_str, size, "T%02x%s", sig, reason);
     if (gdbstub->ops->get_cpu != NULL)
-        snprintf(packet_str + n, sizeof(packet_str) - n, "thread:%x;",
+        snprintf(packet_str + n, size - n, "thread:%x;",
                  gdbstub->ops->get_cpu(args) + 1);
     conn_send_pktstr(&gdbstub->priv->conn, packet_str);
 }
@@ -599,11 +601,10 @@ static void process_query(gdbstub_t *gdbstub, char *payload, void *args)
 #endif
 
     if (!strcmp(name, "C")) {
-        if (gdbstub->ops->get_cpu != NULL) {
-            sprintf(packet_str, "QC%x", gdbstub->ops->get_cpu(args) + 1);
-            conn_send_pktstr(&gdbstub->priv->conn, packet_str);
-        } else
-            conn_send_pktstr(&gdbstub->priv->conn, "");
+        /* A target without get_cpu has a single CPU, thread 1 */
+        int cpuid = gdbstub->ops->get_cpu ? gdbstub->ops->get_cpu(args) : 0;
+        sprintf(packet_str, "QC%x", cpuid + 1);
+        conn_send_pktstr(&gdbstub->priv->conn, packet_str);
     } else if (!strcmp(name, "Supported")) {
         snprintf(packet_str, sizeof(packet_str),
                  "PacketSize=%x;QStartNoAckMode+%s", MAX_DATA_PAYLOAD,
@@ -874,7 +875,11 @@ static gdb_event_t gdbstub_process_packet(gdbstub_t *gdbstub,
         }
         break;
     case '?':
-        send_stop_reply(gdbstub, args, GDB_SIGNAL_TRAP, "");
+        /* Report the last stop; before any resume the target sits in a trap */
+        if (gdbstub->priv->last_stop[0])
+            conn_send_pktstr(&gdbstub->priv->conn, gdbstub->priv->last_stop);
+        else
+            send_stop_reply(gdbstub, args, GDB_SIGNAL_TRAP, "");
         break;
     case 'D':
         /* Send OK before detaching per GDB Remote Serial Protocol */
