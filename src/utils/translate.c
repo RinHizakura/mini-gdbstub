@@ -29,6 +29,24 @@ void str_to_hex(char *str, uint8_t *num, int bytes)
     }
 }
 
+/* Binary-escape src[0, len) into dst, a NUL-terminated string of at most
+ * cap bytes. Stops when the next byte might not fit, so a chunk never splits
+ * an escape pair. Returns the number of source bytes consumed. */
+int escape(const char *src, int len, char *dst, int cap)
+{
+    int r = 0, w = 0;
+    for (; r < len && w + 2 <= cap; r++) {
+        char c = src[r];
+        if (c == '#' || c == '$' || c == '}' || c == '*') {
+            dst[w++] = '}';
+            c ^= 0x20;
+        }
+        dst[w++] = c;
+    }
+    dst[w] = '\0';
+    return r;
+}
+
 int unescape(char *msg, char *end)
 {
     char *w = msg;

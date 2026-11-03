@@ -88,8 +88,8 @@ run_malformed_test()
     expect_reply 'T2' 'E03' || failed=1  # emu has one CPU
     expect_reply 'Z0,0' 'E16' || failed=1
     expect_reply 'qXfer:features:read:target.xml:zz' 'E16' || failed=1
-    expect_reply 'qXfer:features:read:target.xml:ffff,10' 'E16' || failed=1
-    expect_reply 'qXfer:features:read:other.xml:0,10' '' || failed=1
+    expect_reply 'qXfer:features:read:target.xml:ffff,10' 'l' || failed=1
+    expect_reply 'qXfer:features:read:other.xml:0,10' 'E00' || failed=1
 
     # The stub must still be alive and answer a well-formed request
     local mem

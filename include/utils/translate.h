@@ -6,5 +6,6 @@
 void hex_to_str(uint8_t *num, char *str, int bytes);
 void str_to_hex(char *str, uint8_t *num, int bytes);
 int unescape(char *msg, char *end);
+int escape(const char *src, int len, char *dst, int cap);
 
 #endif

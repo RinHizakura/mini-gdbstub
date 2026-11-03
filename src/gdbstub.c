@@ -550,29 +550,32 @@ static void process_xfer(gdbstub_t *gdbstub, char *s)
         char *action = args ? strtok(args, ":") : NULL;
         char *annex = strtok(NULL, ":");
         char *range = strtok(NULL, ":");
-        if (!action || strcmp(action, "read") || !annex ||
-            strcmp(annex, "target.xml")) {
+        if (!action || strcmp(action, "read")) {
             conn_send_pktstr(&gdbstub->priv->conn, "");
+            return;
+        }
+        if (!annex || strcmp(annex, "target.xml")) {
+            send_errno(gdbstub, 0); /* E00: no such annex */
             return;
         }
 
         int offset = 0, length = 0;
         int total_len = strlen(gdbstub->arch.target_desc);
         if (!range || sscanf(range, "%x,%x", &offset, &length) != 2 ||
-            offset < 0 || offset > total_len || length < 0) {
+            offset < 0 || length < 0) {
             SEND_EINVAL(gdbstub);
             return;
         }
 
-        /* Clamp to what is left and to what fits after the 'm'/'l' marker */
-        int remaining = total_len - offset;
+        /* Reading at or past the end yields an empty final chunk */
+        int remaining = offset < total_len ? total_len - offset : 0;
         length = length < remaining ? length : remaining;
-        length = length < MAX_DATA_PAYLOAD - 1 ? length : MAX_DATA_PAYLOAD - 1;
 
+        /* The 'm'/'l' marker takes the first byte; the escaped data follows */
         char buf[MAX_SEND_PACKET_SIZE];
-        buf[0] = length < remaining ? 'm' : 'l';
-        memcpy(buf + 1, gdbstub->arch.target_desc + offset, length);
-        buf[length + 1] = '\0';
+        int sent = escape(gdbstub->arch.target_desc + offset, length, buf + 1,
+                          MAX_DATA_PAYLOAD - 1);
+        buf[0] = offset + sent < total_len ? 'm' : 'l';
         conn_send_pktstr(&gdbstub->priv->conn, buf);
     } else {
         conn_send_pktstr(&gdbstub->priv->conn, "");
