@@ -84,7 +84,8 @@ run_malformed_test()
     expect_reply 'M0,4:00' 'E16' || failed=1
     expect_reply 'X0,4:00' 'E16' || failed=1
     expect_reply 'vCont' 'E16' || failed=1
-    expect_reply 'Hgx' 'E01' || failed=1 # emu has no set_cpu
+    expect_reply 'Hgx' 'E16' || failed=1 # not a hex thread id
+    expect_reply 'T2' 'E03' || failed=1  # emu has one CPU
     expect_reply 'Z0,0' 'E16' || failed=1
     expect_reply 'qXfer:features:read:target.xml:zz' 'E16' || failed=1
     expect_reply 'qXfer:features:read:target.xml:ffff,10' 'E16' || failed=1

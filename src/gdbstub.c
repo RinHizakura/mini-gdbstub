@@ -18,7 +18,7 @@
 /* Poll timeout for reader thread (milliseconds) */
 #define READER_POLL_TIMEOUT_MS 100
 
-/* Each CPU takes 5 characters ("%04d,") in the fThreadInfo reply */
+/* Each CPU takes at most 5 characters ("xxxx,") in the fThreadInfo reply */
 #define MAX_SMP ((MAX_DATA_PAYLOAD - 1) / 5)
 
 struct gdbstub_private {
@@ -208,6 +208,37 @@ static void send_errno(gdbstub_t *gdbstub, int err)
 }
 #define SEND_EPERM(gdbstub) send_errno(gdbstub, EPERM)
 #define SEND_EINVAL(gdbstub) send_errno(gdbstub, EINVAL)
+
+/* A target that does not say how many CPUs it has gets one */
+static inline int smp_count(gdbstub_t *gdbstub)
+{
+    return gdbstub->arch.smp ? gdbstub->arch.smp : 1;
+}
+
+/* GDB thread ids are hex and 1-based: thread N is CPU N-1. The reserved
+ * ids 0 (any thread) and -1 (all threads) map to cpuid -1. */
+static bool thread_to_cpu(gdbstub_t *gdbstub, const char *str, int *cpuid)
+{
+    char *end;
+    long tid = strtol(str, &end, 16);
+    if (end == str || tid < -1 || tid > smp_count(gdbstub))
+        return false;
+    *cpuid = tid > 0 ? tid - 1 : -1;
+    return true;
+}
+
+/* Stop reply: "T05<reason>" plus the stopping thread when the target
+ * can name it, so GDB does not have to guess which CPU stopped. */
+static void send_stop_reply(gdbstub_t *gdbstub, void *args, const char *reason)
+{
+    char packet_str[64];
+    int n = snprintf(packet_str, sizeof(packet_str), "T%02x%s", GDB_SIGNAL_TRAP,
+                     reason);
+    if (gdbstub->ops->get_cpu != NULL)
+        snprintf(packet_str + n, sizeof(packet_str) - n, "thread:%x;",
+                 gdbstub->ops->get_cpu(args) + 1);
+    conn_send_pktstr(&gdbstub->priv->conn, packet_str);
+}
 
 static gdb_event_t process_cont(gdbstub_t *gdbstub)
 {
@@ -568,8 +599,7 @@ static void process_query(gdbstub_t *gdbstub, char *payload, void *args)
 
     if (!strcmp(name, "C")) {
         if (gdbstub->ops->get_cpu != NULL) {
-            int cpuid = gdbstub->ops->get_cpu(args);
-            sprintf(packet_str, "QC%04d", cpuid);
+            sprintf(packet_str, "QC%x", gdbstub->ops->get_cpu(args) + 1);
             conn_send_pktstr(&gdbstub->priv->conn, packet_str);
         } else
             conn_send_pktstr(&gdbstub->priv->conn, "");
@@ -586,15 +616,13 @@ static void process_query(gdbstub_t *gdbstub, char *payload, void *args)
     } else if (!strcmp(name, "Symbol")) {
         conn_send_pktstr(&gdbstub->priv->conn, "OK");
     } else if (!strcmp(name, "fThreadInfo")) {
-        /* Assume at least 1 CPU if user didn't specific
-         * the CPU counts */
-        int smp = gdbstub->arch.smp ? gdbstub->arch.smp : 1;
         char *ptr = packet_str;
 
         *ptr++ = 'm';
-        for (int cpuid = 0; cpuid < smp; cpuid++)
-            ptr += snprintf(ptr, packet_str + sizeof(packet_str) - ptr, "%04d,",
-                            cpuid);
+        for (int cpuid = 0; cpuid < smp_count(gdbstub); cpuid++)
+            ptr += snprintf(ptr, packet_str + sizeof(packet_str) - ptr, "%x,",
+                            cpuid + 1);
+        ptr[-1] = '\0'; /* drop the trailing comma */
         conn_send_pktstr(&gdbstub->priv->conn, packet_str);
     } else if (!strcmp(name, "sThreadInfo")) {
         conn_send_pktstr(&gdbstub->priv->conn, "l");
@@ -761,15 +789,15 @@ static void process_set_break_points(gdbstub_t *gdbstub,
 static void process_set_cpu(gdbstub_t *gdbstub, char *payload, void *args)
 {
     int cpuid;
-    /* We don't support deprecated Hc packet, GDB
-     * should send only send vCont;c and vCont;s here. */
-    if (payload[0] == 'g') {
-        if (sscanf(payload, "g%d", &cpuid) != 1) {
-            SEND_EINVAL(gdbstub);
-            return;
-        }
-        gdbstub->ops->set_cpu(args, cpuid);
+    if ((payload[0] != 'g' && payload[0] != 'c') ||
+        !thread_to_cpu(gdbstub, payload + 1, &cpuid)) {
+        SEND_EINVAL(gdbstub);
+        return;
     }
+    /* Hc only arrives when GDB cannot use vCont; the thread it names is
+     * then whatever Hg already selected, so only Hg switches the CPU. */
+    if (payload[0] == 'g' && cpuid >= 0 && gdbstub->ops->set_cpu != NULL)
+        gdbstub->ops->set_cpu(args, cpuid);
     conn_send_pktstr(&gdbstub->priv->conn, "OK");
 }
 
@@ -845,7 +873,7 @@ static gdb_event_t gdbstub_process_packet(gdbstub_t *gdbstub,
         }
         break;
     case '?':
-        conn_send_pktstr(&gdbstub->priv->conn, "S05");
+        send_stop_reply(gdbstub, args, "");
         break;
     case 'D':
         /* Send OK before detaching per GDB Remote Serial Protocol */
@@ -860,11 +888,7 @@ static gdb_event_t gdbstub_process_packet(gdbstub_t *gdbstub,
         }
         break;
     case 'H':
-        if (gdbstub->ops->set_cpu != NULL) {
-            process_set_cpu(gdbstub, payload, args);
-        } else {
-            SEND_EPERM(gdbstub);
-        }
+        process_set_cpu(gdbstub, payload, args);
         break;
     case 'M':
         if (gdbstub->ops->write_mem != NULL) {
@@ -880,11 +904,15 @@ static gdb_event_t gdbstub_process_packet(gdbstub_t *gdbstub,
             SEND_EPERM(gdbstub);
         }
         break;
-    case 'T':
-        /* FIXME: Assume all CPUs are alive here, any exception case
-         * that user may want to handle? */
-        conn_send_pktstr(&gdbstub->priv->conn, "OK");
+    case 'T': {
+        /* Every CPU is alive; anything else is not a thread */
+        int cpuid;
+        if (thread_to_cpu(gdbstub, payload, &cpuid) && cpuid >= 0)
+            conn_send_pktstr(&gdbstub->priv->conn, "OK");
+        else
+            send_errno(gdbstub, ESRCH);
         break;
+    }
     case 'X':
         if (gdbstub->ops->write_mem != NULL) {
             /* It is important for xwrite to know the end position of packet,
@@ -938,7 +966,7 @@ static gdb_action_t gdbstub_handle_event(gdbstub_t *gdbstub,
 
 static void gdbstub_act_resume(gdbstub_t *gdbstub, void *args)
 {
-    char packet_str[64];
+    char reason[32] = "";
     size_t addr;
     bp_type_t type;
 
@@ -946,15 +974,12 @@ static void gdbstub_act_resume(gdbstub_t *gdbstub, void *args)
      * carries the triggered address, so ask the target first. */
     if (gdbstub->ops->wp_hit != NULL &&
         gdbstub->ops->wp_hit(args, &addr, &type)) {
-        const char *reason = type == WP_READ     ? "rwatch"
-                             : type == WP_ACCESS ? "awatch"
-                                                 : "watch";
-        snprintf(packet_str, sizeof(packet_str), "T%02x%s:%zx;",
-                 GDB_SIGNAL_TRAP, reason, addr);
-    } else {
-        snprintf(packet_str, sizeof(packet_str), "S%02x", GDB_SIGNAL_TRAP);
+        const char *kind = type == WP_READ     ? "rwatch"
+                           : type == WP_ACCESS ? "awatch"
+                                               : "watch";
+        snprintf(reason, sizeof(reason), "%s:%zx;", kind, addr);
     }
-    conn_send_pktstr(&gdbstub->priv->conn, packet_str);
+    send_stop_reply(gdbstub, args, reason);
 }
 
 /* Maximum consecutive checksum failures before disconnecting */
