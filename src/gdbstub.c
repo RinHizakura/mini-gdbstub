@@ -119,21 +119,11 @@ static void *socket_reader(void *arg)
         /* Process complete packets */
         while (pktbuf_is_complete(&pktbuf)) {
             packet_t *pkt = pktbuf_pop_packet(&pktbuf);
-            if (pkt) {
-                /* Push to queue first, only ACK after successful push.
-                 * This ensures ACK timing reflects actual packet acceptance. */
-                if (pktqueue_push(&priv->pktqueue, pkt)) {
-                    /* Use non-blocking send for ACK to prevent priority
-                     * inversion. If main thread holds send_mutex, ACK is
-                     * skipped and GDB will retransmit on timeout. This
-                     * keeps the reader thread responsive for interrupts. */
-                    conn_try_send_str(&priv->conn, STR_ACK);
-                } else {
-                    /* Allocation failure - free packet, skip ACK.
-                     * GDB will timeout and retransmit. */
-                    free(pkt);
-                }
-            }
+            /* The main thread acknowledges once it has verified the
+             * checksum; on allocation failure the packet is dropped and GDB
+             * retransmits after its timeout. */
+            if (pkt && !pktqueue_push(&priv->pktqueue, pkt))
+                free(pkt);
         }
     }
 

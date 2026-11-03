@@ -25,9 +25,4 @@ void conn_send_str(conn_t *conn, char *str);
 void conn_send_pktstr(conn_t *conn, char *pktstr);
 void conn_close(conn_t *conn);
 
-/* Non-blocking send for ACKs.
- * Returns true if sent successfully, false if would block or error.
- * Used by reader thread to avoid blocking on send_mutex. */
-bool conn_try_send_str(conn_t *conn, char *str);
-
 #endif

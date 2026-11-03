@@ -106,56 +106,30 @@ mutex_fail:
 #define CONN_SEND_TIMEOUT_MS 5000
 #define CONN_SEND_POLL_MS 100
 
-static bool __conn_send_str(conn_t *conn, char *str, size_t timeout)
+void conn_send_str(conn_t *conn, char *str)
 {
     size_t len = strlen(str);
     size_t total_waited = 0;
 
-    /* Use short timeout for non-blocking send */
+    pthread_mutex_lock(&conn->send_mutex);
     while (len > 0) {
         if (!socket_writable(conn->socket_fd, CONN_SEND_POLL_MS)) {
             total_waited += CONN_SEND_POLL_MS;
-            if (total_waited >= timeout)
-                return false;
+            if (total_waited >= CONN_SEND_TIMEOUT_MS)
+                break;
             continue; /* Retry until timeout */
         }
 
         ssize_t nwrite = write(conn->socket_fd, str, len);
         if (nwrite == -1) {
-            if ((errno == EINTR) ||
-                (timeout && (errno == EAGAIN || errno == EWOULDBLOCK))) {
+            if (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK)
                 continue;
-            }
-            return false; /* Fatal error */
+            break; /* Fatal error */
         }
         str += nwrite;
         len -= nwrite;
         total_waited = 0; /* Reset wait time after successful write */
     }
-
-    return true;
-}
-
-bool conn_try_send_str(conn_t *conn, char *str)
-{
-    /* Try to acquire mutex without blocking.
-     * This prevents priority inversion where the reader thread
-     * blocks on send_mutex while trying to send ACKs. */
-    if (pthread_mutex_trylock(&conn->send_mutex) != 0)
-        return false; /* Mutex held by another thread */
-
-    bool ret = __conn_send_str(conn, str, 0);
-
-    pthread_mutex_unlock(&conn->send_mutex);
-    return ret;
-}
-
-void conn_send_str(conn_t *conn, char *str)
-{
-    pthread_mutex_lock(&conn->send_mutex);
-
-    __conn_send_str(conn, str, CONN_SEND_TIMEOUT_MS);
-
     pthread_mutex_unlock(&conn->send_mutex);
 }
 
