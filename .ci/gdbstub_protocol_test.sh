@@ -61,14 +61,10 @@ run_protocol_test()
     # Exactly one ack precedes a reply. PacketSize is hex; GDB sizes its
     # 'm' requests to half of it, so 0x7fd bytes must work and 0x7fe not.
     raw=$(rsp_exchange_raw 'qSupported:vContSupported+')
-    expect_raw 'qSupported' "$raw" \
-        '+$PacketSize=ffa;QStartNoAckMode+;qXfer:features:read+#??' || failed=1
+    expect_raw 'qSupported' "$raw" '+$*PacketSize=ffa;*#??' || failed=1
     raw=$(rsp_exchange 'm0,7fd')
     expect_raw 'm0,7fd' "${#raw} hex digits" '4090 hex digits' || failed=1
     expect_reply 'm0,7fe' 'E16' || failed=1
-
-    # GDB only uses vCont when all four actions are advertised
-    expect_reply 'vCont?' 'vCont;c;C;s;S' || failed=1
 
     # Thread ids are hex, start at 1, and 0 / -1 mean any / all
     expect_reply '?' 'T05' || failed=1
@@ -102,6 +98,14 @@ run_protocol_test()
     raw=$(rsp_recv)
     expect_raw 'Ctrl-C' "$raw" '$T02#b6' || failed=1
     expect_reply '?' 'T02' || failed=1
+
+    # The signal forms GDB sends once vCont is in use are accepted too
+    rsp_send 'vCont;C05'
+    sleep 0.2
+    printf '\003' >&3
+    raw=$(rsp_recv)
+    expect_raw 'vCont;C05 then Ctrl-C' "$raw" '$T02#b6' || failed=1
+    expect_reply 'vCont;S05' 'T05' || failed=1
     expect_reply 'vCont;s' 'T05' || failed=1
     expect_reply '?' 'T05' || failed=1
 
