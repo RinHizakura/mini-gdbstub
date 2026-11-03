@@ -124,8 +124,8 @@ test_pass()
         fi
     fi
     print_success "PASS: $test_name$duration"
-    ((TESTS_PASSED++))
-    ((TESTS_TOTAL++))
+    TESTS_PASSED=$((TESTS_PASSED + 1))
+    TESTS_TOTAL=$((TESTS_TOTAL + 1))
     TEST_RESULTS+=("PASS: $test_name$duration")
 }
 
@@ -134,8 +134,8 @@ test_fail()
     local test_name="$1"
     local reason="${2:-}"
     print_error "FAIL: $test_name${reason:+ - $reason}"
-    ((TESTS_FAILED++))
-    ((TESTS_TOTAL++))
+    TESTS_FAILED=$((TESTS_FAILED + 1))
+    TESTS_TOTAL=$((TESTS_TOTAL + 1))
     TEST_RESULTS+=("FAIL: $test_name${reason:+ - $reason}")
 }
 
@@ -303,7 +303,7 @@ find_riscv_gdb()
 {
     local cross="${CROSS_COMPILE:-}"
     local gdb_candidates=(
-        "${cross}gdb"
+        "${cross:+${cross}gdb}" # skipped when no prefix: plain gdb lacks RISC-V
         "gdb-multiarch"
         "riscv64-unknown-elf-gdb"
         "riscv32-unknown-elf-gdb"

@@ -1,209 +1,188 @@
 #!/usr/bin/env bash
+#
+# Shared harness for the stub tests. A test is a short script:
+#
+#   source "$(dirname "$0")/test_common.sh"
+#   test_begin "GDB Continue Test"
+#   gdb_session << 'EOF'
+#   printf "PC = %p\n", $pc
+#   continue
+#   EOF
+#   expect_output "PC was read" 'PC = 0x'
+#   test_end
+#
+# Checks never abort the test: they log their outcome and count failures,
+# so every expectation gets reported. test_end turns the count into the
+# verdict. Only a missing prerequisite or a dead emulator ends a test early.
+#
+# Environment Variables:
+#   ARCH            Target architecture: rv32 or rv64 (default: rv64)
+#   GDB_PORT        Port the stub listens on (default: 1234)
+#   RISCV_GDB       GDB executable (default: auto-detected)
+#
 
 set -euo pipefail
-
 source "$(dirname "$0")/common.sh"
 
-# Configuration
 ARCH="${ARCH:-rv64}"
-
-# Create secure temporary file with optional test name suffix.
-# Usage: TMPFILE=$(create_temp_file "testname")
-create_temp_file()
-{
-    local name="${1:-gdbstub_test}"
-    mktemp "${TMPDIR:-/tmp}/${name}.XXXXXX"
-}
-
-# Generate common GDB script header (preamble).
-# Usage: gdb_script_header >> "$script_file"
-gdb_script_header()
-{
-    local gdb_arch
-    gdb_arch=$(get_gdb_arch)
-    cat << EOF
-set pagination off
-set confirm off
-set architecture $gdb_arch
-file "$TEST_OBJ"
-target remote :$GDB_PORT
-EOF
-}
-
-# Initialize test environment: set gdb_arch and register cleanup.
-# Usage: init_test [cleanup_function]
-init_test()
-{
-    local cleanup_func="${1:-cleanup_test}"
-    gdb_arch=$(get_gdb_arch)
-    register_cleanup "$cleanup_func"
-}
 GDB_PORT="${GDB_PORT:-1234}"
 EMUDIR="build/emu/$ARCH"
-TEST_NAME="emu_test"
-TEST_OBJ="$EMUDIR/$TEST_NAME.obj"
-TEST_BIN="$EMUDIR/$TEST_NAME.bin"
+TEST_OBJ="$EMUDIR/emu_test.obj"
+TEST_BIN="$EMUDIR/emu_test.bin"
+REG_NUM=33 # x0..x31 + pc
+case "$ARCH" in
+    rv32 | RV32) GDB_ARCH="riscv:rv32" REG_HEX=8 ;;
+    *) GDB_ARCH="riscv:rv64" REG_HEX=16 ;;
+esac
 
-# Cleanup handler
-cleanup_test()
+FAILURES=0
+GDB_RUNS=0
+GDB_OUT="" # transcript of the latest gdb_session
+WORK=$(mktemp -d "${TMPDIR:-/tmp}/gdbstub_test.XXXXXX")
+EMU_LOG="$WORK/emu.log"
+cleanup_work() { rm -rf "$WORK"; }
+register_cleanup cleanup_work
+
+# test_begin <name>: announce the test and make sure the emulator exists
+test_begin()
 {
-    rm -f "$TMPFILE" "$TMPFILE.gdb"
-    cleanup_emulator
-}
-
-# Determine GDB architecture string
-get_gdb_arch()
-{
-    case "$ARCH" in
-        rv32 | RV32) echo "riscv:rv32" ;;
-        rv64 | RV64) echo "riscv:rv64" ;;
-        *) echo "riscv:rv64" ;;
-    esac
-}
-
-# Verify test prerequisites
-check_prerequisites()
-{
-    test_start "Prerequisites check"
-
-    if [[ ! -x "$EMUDIR/emu" ]]; then
-        test_fail "Prerequisites" "Emulator not found: $EMUDIR/emu"
-        print_info "Run: make build-emu (or make build-emu-rv32 for RV32)"
-        return 1
-    fi
-
-    if [[ ! -f "$TEST_BIN" ]]; then
-        test_fail "Prerequisites" "Test binary not found: $TEST_BIN"
-        return 1
-    fi
-
-    if [[ ! -f "$TEST_OBJ" ]]; then
-        test_fail "Prerequisites" "Test object not found: $TEST_OBJ"
-        return 1
-    fi
-
-    test_pass "Prerequisites"
-    return 0
-}
-
-run_gdb_test_script()
-{
-    local test_script="$1"
-    local testcase="$2"
-
-    test_start "Testcase: $testcase ($ARCH)"
-
-    # Find GDB
-    local gdb
-    if [[ -n "${RISCV_GDB:-}" ]]; then
-        gdb="$RISCV_GDB"
-    else
-        gdb=$(find_riscv_gdb) || {
-            test_fail "$testcase" "No suitable GDB found"
-            return 1
-        }
-    fi
-
-    print_info "Using GDB: $gdb"
-    print_info "Architecture: ${gdb_arch:-$(get_gdb_arch)}"
-
-    # Start emulator in background
-    print_step "Starting emulator..."
-    "$EMUDIR/emu" "$TEST_BIN" &
-    local emu_pid=$!
-    register_pid $emu_pid
-
-    # Wait for emulator to be ready
-    if ! wait_for_port "$GDB_PORT" 5 || ! kill -0 $emu_pid 2> /dev/null; then
-        test_fail "$testcase" "Emulator failed to start"
-        return 1
-    fi
-
-    # Run GDB with timeout to prevent hangs
-    print_step "Running GDB session..."
-    local gdb_timeout=30
-    if ! timeout "$gdb_timeout" "$gdb" --batch -x "$test_script" > "$TMPFILE" 2>&1; then
-        local exit_code=$?
-        # timeout returns 124 on timeout
-        if [[ $exit_code -eq 124 ]]; then
-            test_fail "$testcase" "GDB session timed out after ${gdb_timeout}s"
-            return 1
-        fi
-        # GDB may return non-zero on remote close, check output
-        if ! grep -q "Remote connection closed\|Remote communication error" "$TMPFILE"; then
-            test_fail "$testcase" "GDB session failed"
-            print_error "GDB output:"
-            cat "$TMPFILE" >&2
-            return 1
-        fi
-    fi
-
-    # Verify test completed
-    wait $emu_pid 2> /dev/null || true
-}
-
-run_prerequisites_test()
-{
-    print_header "$TESTCASE"
+    TESTCASE="$1 ($ARCH)"
+    print_header "$1"
     print_info "Architecture: $ARCH"
-    print_info "Emulator: $EMUDIR/emu"
-
-    check_prerequisites
+    test_start "$TESTCASE"
+    for f in "$EMUDIR/emu" "$TEST_BIN" "$TEST_OBJ"; do
+        [[ -e "$f" ]] || die "missing $f (run: make build-emu ARCH=$ARCH)"
+    done
 }
 
-# Expected register count: x0..x31 + pc = 33
-REG_NUM=33
-
-# Register hex width per architecture
-get_reg_hex_len()
+# die <reason>: nothing further can be checked, so fail now
+die()
 {
-    case "$ARCH" in
-        rv32 | RV32) echo 8 ;;  # 4 bytes = 8 hex chars
-        rv64 | RV64) echo 16 ;; # 8 bytes = 16 hex chars
-        *) echo 16 ;;
-    esac
+    test_fail "$TESTCASE" "$1"
+    dump_logs
+    exit 1
 }
 
-# Extract register hex blob from maintenance packet output.
-# Extracts the quoted content from 'received: "..."' lines, then filters
-# for pure hex strings of at least 64 characters (smallest valid register
-# dump: 8 regs * 4 bytes * 2 hex = 64). This avoids matching short
-# protocol responses (OK, E16, qSupported, etc.).
+dump_logs()
+{
+    if [[ -n "$GDB_OUT" ]]; then
+        print_error "GDB output:"
+        cat "$GDB_OUT" >&2
+    fi
+    if [[ -s "$EMU_LOG" ]]; then
+        print_error "Emulator output:"
+        cat "$EMU_LOG" >&2
+    fi
+}
+
+# test_end: report the verdict and exit with it
+test_end()
+{
+    exec 3>&-
+    if [[ $FAILURES -eq 0 ]]; then
+        test_pass "$TESTCASE"
+    else
+        test_fail "$TESTCASE" "$FAILURES check(s) failed"
+        dump_logs
+    fi
+    print_test_summary || true
+    exit $((FAILURES > 0))
+}
+
+# check <label> <got> <glob pattern>
+check()
+{
+    if [[ "$2" == $3 ]]; then
+        print_info "$1 -> '$2'"
+    else
+        print_error "$1 -> '$2' (expected $3)"
+        FAILURES=$((FAILURES + 1))
+    fi
+}
+
+# expect_output <label> <ERE> [file]: the GDB transcript must match
+expect_output()
+{
+    if grep -qE "$2" "${3:-$GDB_OUT}"; then
+        print_info "$1"
+    else
+        print_error "$1 (no match for /$2/)"
+        FAILURES=$((FAILURES + 1))
+    fi
+}
+
+# reply_to <ERE>: the transcript from the matching "Sending packet" line to
+# the next "Packet received" line, for checking what answered a packet
+reply_to()
+{
+    sed -n "/Sending packet:.*$1/,/Packet received:/p" "$GDB_OUT"
+}
+
+# start_emu [binary]: (re)start the emulator and wait until it listens. The
+# stub serves a single connection, so a previous instance is stopped first.
+start_emu()
+{
+    if [[ ${#CLEANUP_PIDS[@]} -gt 0 ]]; then
+        cleanup_emulator
+        wait 2> /dev/null || true
+        CLEANUP_PIDS=()
+        sleep 0.3 # let the port go
+    fi
+    "$EMUDIR/emu" "${1:-$TEST_BIN}" >> "$EMU_LOG" 2>&1 &
+    EMU_PID=$!
+    register_pid $EMU_PID
+    wait_for_port "$GDB_PORT" 5 && kill -0 $EMU_PID 2> /dev/null ||
+        die "emulator failed to start"
+}
+
+# gdb_session [binary] << 'EOF' ... EOF
+# Run the GDB commands on stdin, after the connection preamble, against a
+# fresh emulator. The transcript lands in $GDB_OUT. GDB_DEBUG=1 turns on
+# "set debug remote" before connecting so the handshake is logged too.
+gdb_session()
+{
+    GDB=${GDB:-${RISCV_GDB:-$(find_riscv_gdb)}} || die "no GDB found"
+    start_emu "$@"
+    {
+        echo "set pagination off"
+        echo "set confirm off"
+        echo "set architecture $GDB_ARCH"
+        echo "file \"$TEST_OBJ\""
+        [[ -n "${GDB_DEBUG:-}" ]] && echo "set debug remote 1"
+        echo "target remote :$GDB_PORT"
+        cat
+    } > "$WORK/gdb.cmd"
+    GDB_OUT="$WORK/gdb.$((++GDB_RUNS)).out"
+
+    print_step "Running GDB ($GDB)..."
+    timeout 30 "$GDB" --batch -x "$WORK/gdb.cmd" > "$GDB_OUT" 2>&1 || {
+        case $? in
+            124) die "GDB session timed out" ;;
+            *) grep -q "Remote connection closed\|Remote communication error" \
+                "$GDB_OUT" || die "GDB exited with an error" ;;
+        esac
+    }
+    wait $EMU_PID 2> /dev/null || true
+}
+
+# extract_reg_blob [occurrence]: the Nth register dump a "maintenance packet
+# g" produced, in lower case. A dump is the only reply of 64+ hex digits.
 extract_reg_blob()
 {
-    local file="$1"
-    local occurrence="${2:-1}"
-    grep 'received: "' "$file" \
-        | sed 's/.*received: "\([^"]*\)".*/\1/' \
-        | grep -iE '^[0-9a-f]{64,}$' \
-        | sed -n "${occurrence}p"
-}
-
-# Normalize hex string to lowercase for portable comparison.
-hex_lower()
-{
-    tr '[:upper:]' '[:lower:]'
-}
-
-# Kill any emulator still running from a previous test within this script.
-# The emulator accepts exactly one connection (single-shot), so we must
-# ensure the previous instance is fully gone before starting a new one.
-kill_prev_emulator()
-{
-    for pid in "${CLEANUP_PIDS[@]:-}"; do
-        if [[ -n "$pid" ]] && kill -0 "$pid" 2> /dev/null; then
-            kill "$pid" 2> /dev/null || true
-            wait "$pid" 2> /dev/null || true
-        fi
-    done
-    # Clear the list so we don't attempt to kill stale or reused PIDs.
-    CLEANUP_PIDS=()
-    # Brief pause for the OS to release the port (SO_REUSEADDR helps but
-    # the TIME_WAIT state can still cause transient bind failures).
-    sleep 0.3
+    grep 'received: "' "$GDB_OUT" |
+        sed 's/.*received: "\([^"]*\)".*/\1/' |
+        grep -iE '^[0-9a-f]{64,}$' |
+        sed -n "${1:-1}p" | tr 'A-F' 'a-f'
 }
 
 # --- Raw Remote Serial Protocol helpers; the socket is open on fd 3 ---
+
+# connect_emu [binary]: start the emulator and open the socket on fd 3
+connect_emu()
+{
+    start_emu "$@"
+    exec 3<> "/dev/tcp/127.0.0.1/$GDB_PORT"
+}
 
 # RSP checksum: sum of the payload bytes modulo 256, as two hex digits
 rsp_csum()
@@ -251,23 +230,8 @@ rsp_exchange()
     echo "${raw%#??}"
 }
 
-# Checks log their outcome and count failures in RSP_FAILED instead of
-# returning one, so a test runs every check and reports all mismatches.
-RSP_FAILED=0
-
-# expect_raw <label> <got> <glob pattern>
-expect_raw()
-{
-    if [[ "$2" == $3 ]]; then
-        print_info "$1 -> '$2'"
-    else
-        print_error "$1 -> '$2' (expected $3)"
-        RSP_FAILED=$((RSP_FAILED + 1))
-    fi
-}
-
 # expect_reply <packet> <expected reply>
 expect_reply()
 {
-    expect_raw "$1" "$(rsp_exchange "$1")" "$2"
+    check "$1" "$(rsp_exchange "$1")" "$2"
 }

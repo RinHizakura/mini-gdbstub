@@ -29,6 +29,7 @@ TEST_RV64=false
 ARCH_EXPLICIT=false
 OVERALL_PASSED=0
 OVERALL_FAILED=0
+RESULTS=()
 
 usage()
 {
@@ -127,83 +128,21 @@ parse_args()
 
 run_arch_tests()
 {
-    local arch="$1"
-    local passed=0
-    local failed=0
-
+    local arch="$1" test name
     print_header "Testing $arch Architecture"
 
-    # Run continue test
-    print_step "Running continue test..."
-    if ARCH="$arch" "$SCRIPT_DIR/gdbstub_cont_test.sh"; then
-        ((passed++))
-    else
-        ((failed++))
-    fi
-
-    # Run breakpoint test
-    print_step "Running breakpoint test..."
-    if ARCH="$arch" "$SCRIPT_DIR/gdbstub_bp_test.sh"; then
-        ((passed++))
-    else
-        ((failed++))
-    fi
-
-    # Run watchpoint test
-    print_step "Running hardware breakpoint and watchpoint test..."
-    if ARCH="$arch" "$SCRIPT_DIR/gdbstub_wp_test.sh"; then
-        ((passed++))
-    else
-        ((failed++))
-    fi
-
-    # Run malformed packet test
-    print_step "Running malformed packet test..."
-    if ARCH="$arch" "$SCRIPT_DIR/gdbstub_malformed_test.sh"; then
-        ((passed++))
-    else
-        ((failed++))
-    fi
-
-    # Run protocol conformance test
-    print_step "Running protocol conformance test..."
-    if ARCH="$arch" "$SCRIPT_DIR/gdbstub_protocol_test.sh"; then
-        ((passed++))
-    else
-        ((failed++))
-    fi
-
-    # Run single register write test
-    print_step "Running single register write test..."
-    if ARCH="$arch" "$SCRIPT_DIR/gdbstub_regwrite_single_test.sh"; then
-        ((passed++))
-    else
-        ((failed++))
-    fi
-
-    # Run bulk register reject test
-    print_step "Running bulk register reject test..."
-    if ARCH="$arch" "$SCRIPT_DIR/gdbstub_regwrite_bulk_reject_test.sh"; then
-        ((passed++))
-    else
-        ((failed++))
-    fi
-
-    # Run bulk register roundtrip test
-    print_step "Running bulk register roundtrip test..."
-    if ARCH="$arch" "$SCRIPT_DIR/gdbstub_regwrite_bulk_roundtrip_test.sh"; then
-        ((passed++))
-    else
-        ((failed++))
-    fi
-
-    echo ""
-    print_info "$arch Results: $passed passed, $failed failed"
-
-    OVERALL_PASSED=$((OVERALL_PASSED + passed))
-    OVERALL_FAILED=$((OVERALL_FAILED + failed))
-
-    return $failed
+    for test in "$SCRIPT_DIR"/gdbstub_*_test.sh; do
+        name=$(basename "$test" _test.sh)
+        name=${name#gdbstub_}
+        print_step "Running $name test..."
+        if ARCH="$arch" "$test"; then
+            RESULTS+=("| $arch | $name | PASSED |")
+            OVERALL_PASSED=$((OVERALL_PASSED + 1))
+        else
+            RESULTS+=("| $arch | $name | FAILED |")
+            OVERALL_FAILED=$((OVERALL_FAILED + 1))
+        fi
+    done
 }
 
 main()
@@ -212,20 +151,19 @@ main()
 
     print_header "GDB Stub Test Suite"
 
-    local exit_code=0
+    [[ "$TEST_RV64" == "true" ]] && run_arch_tests "rv64"
+    [[ "$TEST_RV32" == "true" ]] && run_arch_tests "rv32"
 
-    if [[ "$TEST_RV64" == "true" ]]; then
-        run_arch_tests "rv64" || exit_code=1
-    fi
-
-    if [[ "$TEST_RV32" == "true" ]]; then
-        run_arch_tests "rv32" || exit_code=1
-    fi
-
-    # Print overall summary
     print_header "Overall Test Summary"
+    printf '  %s\n' "${RESULTS[@]}"
     echo -e "  ${BOLD}Total Passed: ${GREEN}$OVERALL_PASSED${NC}"
     echo -e "  ${BOLD}Total Failed: ${RED}$OVERALL_FAILED${NC}"
+
+    # GitHub Actions shows this table on the run's summary page
+    if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
+        printf '%s\n' "| Arch | Test | Status |" "|------|------|--------|" \
+            "${RESULTS[@]}" >> "$GITHUB_STEP_SUMMARY"
+    fi
 
     if [[ $OVERALL_FAILED -gt 0 ]]; then
         echo -e "\n  ${RED}${BOLD}SOME TESTS FAILED${NC}"
