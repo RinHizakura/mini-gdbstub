@@ -584,13 +584,10 @@ static void process_query(gdbstub_t *gdbstub, char *payload, void *args)
         } else
             conn_send_pktstr(&gdbstub->priv->conn, "");
     } else if (!strcmp(name, "Supported")) {
-        if (gdbstub->arch.target_desc != NULL)
-            conn_send_pktstr(
-                &gdbstub->priv->conn,
-                "PacketSize=1024;qXfer:features:read+;QStartNoAckMode+");
-        else
-            conn_send_pktstr(&gdbstub->priv->conn,
-                             "PacketSize=1024;QStartNoAckMode+");
+        snprintf(packet_str, sizeof(packet_str),
+                 "PacketSize=%x;QStartNoAckMode+%s", MAX_DATA_PAYLOAD,
+                 gdbstub->arch.target_desc ? ";qXfer:features:read+" : "");
+        conn_send_pktstr(&gdbstub->priv->conn, packet_str);
     } else if (!strcmp(name, "Attached")) {
         /* assume attached to an existing process */
         conn_send_pktstr(&gdbstub->priv->conn, "1");
