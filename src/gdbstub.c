@@ -30,6 +30,7 @@ struct gdbstub_private {
     volatile bool thread_stop; /* Per-instance thread control */
     bool reader_running;       /* Explicit flag for thread state */
     bool async_io_enable;
+    bool interrupted; /* Ctrl-C arrived while the target was running */
     void *args;
 
     /* Cached register size totals (computed once at init) */
@@ -118,7 +119,7 @@ static void *socket_reader(void *arg)
             pktbuf.interrupts = 0;
             if (async_io_is_enable(priv) && gdbstub->ops->on_interrupt)
                 gdbstub->ops->on_interrupt(priv->args);
-            pktqueue_signal_interrupt(&priv->pktqueue);
+            __atomic_store_n(&priv->interrupted, true, __ATOMIC_RELAXED);
         }
     }
 
@@ -947,9 +948,9 @@ static gdb_action_t gdbstub_handle_event(gdbstub_t *gdbstub,
 
     switch (event) {
     case EVENT_CONT:
-        /* Drop any stale interrupt so only one raised during this run
-         * is reported as the stop reason */
-        pktqueue_check_interrupt(&gdbstub->priv->pktqueue);
+        /* Clear any interrupt left over from before this run, so a set
+         * flag afterwards can only mean a Ctrl-C arrived while running */
+        __atomic_store_n(&gdbstub->priv->interrupted, false, __ATOMIC_RELAXED);
         async_io_enable(gdbstub->priv);
         act = gdbstub->ops->cont(args);
         async_io_disable(gdbstub->priv);
@@ -984,7 +985,8 @@ static void gdbstub_act_resume(gdbstub_t *gdbstub, void *args)
     }
     /* A Ctrl-C from GDB stops the target with SIGINT, anything else is a
      * trap (breakpoint, watchpoint or single step) */
-    int sig = pktqueue_check_interrupt(&gdbstub->priv->pktqueue)
+    int sig = __atomic_exchange_n(&gdbstub->priv->interrupted, false,
+                                  __ATOMIC_RELAXED)
                   ? GDB_SIGNAL_INT
                   : GDB_SIGNAL_TRAP;
     send_stop_reply(gdbstub, args, sig, reason);
@@ -1015,17 +1017,11 @@ bool gdbstub_run(gdbstub_t *gdbstub, void *args)
     conn_t *conn = &gdbstub->priv->conn;
 
     while (true) {
-        /* Pop packet from queue (blocks until available or shutdown) */
+        /* Blocks until a packet arrives; NULL means the reader thread shut
+         * down because the connection closed */
         packet_t *pkt = pktqueue_pop(&gdbstub->priv->pktqueue);
-
-        if (!pkt) {
-            /* Check if shutdown or just interrupt */
-            if (pktqueue_is_shutdown(&gdbstub->priv->pktqueue))
-                return true; /* Clean shutdown */
-            /* Clear interrupt flag to prevent busy loop */
-            pktqueue_check_interrupt(&gdbstub->priv->pktqueue);
-            continue;
-        }
+        if (!pkt)
+            return true;
 
         /* Verify checksum before processing */
         bool csum_ok = packet_csum_verify(pkt);

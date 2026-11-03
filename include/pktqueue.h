@@ -23,7 +23,6 @@ typedef struct {
     pthread_mutex_t mutex;
     pthread_cond_t cond; /* for blocking pop */
     bool shutdown;       /* signal reader to stop */
-    bool interrupted;    /* interrupt character received */
 } pktqueue_t;
 
 /* Initialize packet queue. Returns true on success. */
@@ -46,16 +45,5 @@ packet_t *pktqueue_pop(pktqueue_t *queue);
 
 /* Signal shutdown to unblock any waiting pop operation. */
 void pktqueue_signal_shutdown(pktqueue_t *queue);
-
-/* Signal that an interrupt character (0x03) was received.
- * This wakes up any blocked pop to allow interrupt handling.
- */
-void pktqueue_signal_interrupt(pktqueue_t *queue);
-
-/* Check and clear the interrupt flag. Returns true if interrupted. */
-bool pktqueue_check_interrupt(pktqueue_t *queue);
-
-/* Check if shutdown was signaled. */
-bool pktqueue_is_shutdown(pktqueue_t *queue);
 
 #endif

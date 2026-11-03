@@ -7,7 +7,6 @@ bool pktqueue_init(pktqueue_t *queue)
 {
     queue->head = queue->tail = NULL;
     queue->shutdown = false;
-    queue->interrupted = false;
 
     if (pthread_mutex_init(&queue->mutex, NULL) != 0)
         return false;
@@ -69,19 +68,10 @@ packet_t *pktqueue_pop(pktqueue_t *queue)
 {
     pthread_mutex_lock(&queue->mutex);
 
-    /* Wait until packet available, interrupted, or shutdown */
-    while (!queue->head && !queue->shutdown && !queue->interrupted)
+    while (!queue->head && !queue->shutdown)
         pthread_cond_wait(&queue->cond, &queue->mutex);
 
     /* Return NULL on shutdown with empty queue */
-    if (queue->shutdown && !queue->head) {
-        pthread_mutex_unlock(&queue->mutex);
-        return NULL;
-    }
-
-    /* If only interrupted (no packet), return NULL but don't clear flag
-     * The caller should check pktqueue_check_interrupt()
-     */
     if (!queue->head) {
         pthread_mutex_unlock(&queue->mutex);
         return NULL;
@@ -105,29 +95,4 @@ void pktqueue_signal_shutdown(pktqueue_t *queue)
     queue->shutdown = true;
     pthread_cond_broadcast(&queue->cond);
     pthread_mutex_unlock(&queue->mutex);
-}
-
-void pktqueue_signal_interrupt(pktqueue_t *queue)
-{
-    pthread_mutex_lock(&queue->mutex);
-    queue->interrupted = true;
-    pthread_cond_signal(&queue->cond);
-    pthread_mutex_unlock(&queue->mutex);
-}
-
-bool pktqueue_check_interrupt(pktqueue_t *queue)
-{
-    pthread_mutex_lock(&queue->mutex);
-    bool was_interrupted = queue->interrupted;
-    queue->interrupted = false;
-    pthread_mutex_unlock(&queue->mutex);
-    return was_interrupted;
-}
-
-bool pktqueue_is_shutdown(pktqueue_t *queue)
-{
-    pthread_mutex_lock(&queue->mutex);
-    bool shutdown = queue->shutdown;
-    pthread_mutex_unlock(&queue->mutex);
-    return shutdown;
 }
