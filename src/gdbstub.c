@@ -224,11 +224,13 @@ static bool thread_to_cpu(gdbstub_t *gdbstub, const char *str, int *cpuid)
 
 /* Stop reply: "T05<reason>" plus the stopping thread when the target
  * can name it, so GDB does not have to guess which CPU stopped. */
-static void send_stop_reply(gdbstub_t *gdbstub, void *args, const char *reason)
+static void send_stop_reply(gdbstub_t *gdbstub,
+                            void *args,
+                            int sig,
+                            const char *reason)
 {
     char packet_str[64];
-    int n = snprintf(packet_str, sizeof(packet_str), "T%02x%s", GDB_SIGNAL_TRAP,
-                     reason);
+    int n = snprintf(packet_str, sizeof(packet_str), "T%02x%s", sig, reason);
     if (gdbstub->ops->get_cpu != NULL)
         snprintf(packet_str + n, sizeof(packet_str) - n, "thread:%x;",
                  gdbstub->ops->get_cpu(args) + 1);
@@ -871,7 +873,7 @@ static gdb_event_t gdbstub_process_packet(gdbstub_t *gdbstub,
         }
         break;
     case '?':
-        send_stop_reply(gdbstub, args, "");
+        send_stop_reply(gdbstub, args, GDB_SIGNAL_TRAP, "");
         break;
     case 'D':
         /* Send OK before detaching per GDB Remote Serial Protocol */
@@ -945,6 +947,9 @@ static gdb_action_t gdbstub_handle_event(gdbstub_t *gdbstub,
 
     switch (event) {
     case EVENT_CONT:
+        /* Drop any stale interrupt so only one raised during this run
+         * is reported as the stop reason */
+        pktqueue_check_interrupt(&gdbstub->priv->pktqueue);
         async_io_enable(gdbstub->priv);
         act = gdbstub->ops->cont(args);
         async_io_disable(gdbstub->priv);
@@ -977,7 +982,12 @@ static void gdbstub_act_resume(gdbstub_t *gdbstub, void *args)
                                                : "watch";
         snprintf(reason, sizeof(reason), "%s:%zx;", kind, addr);
     }
-    send_stop_reply(gdbstub, args, reason);
+    /* A Ctrl-C from GDB stops the target with SIGINT, anything else is a
+     * trap (breakpoint, watchpoint or single step) */
+    int sig = pktqueue_check_interrupt(&gdbstub->priv->pktqueue)
+                  ? GDB_SIGNAL_INT
+                  : GDB_SIGNAL_TRAP;
+    send_stop_reply(gdbstub, args, sig, reason);
 }
 
 /* Maximum consecutive checksum failures before disconnecting */
