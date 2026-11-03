@@ -251,15 +251,23 @@ rsp_exchange()
     echo "${raw%#??}"
 }
 
+# Checks log their outcome and count failures in RSP_FAILED instead of
+# returning one, so a test runs every check and reports all mismatches.
+RSP_FAILED=0
+
+# expect_raw <label> <got> <glob pattern>
+expect_raw()
+{
+    if [[ "$2" == $3 ]]; then
+        print_info "$1 -> '$2'"
+    else
+        print_error "$1 -> '$2' (expected $3)"
+        RSP_FAILED=$((RSP_FAILED + 1))
+    fi
+}
+
 # expect_reply <packet> <expected reply>
 expect_reply()
 {
-    local got
-    got=$(rsp_exchange "$1")
-    if [[ "$got" == "$2" ]]; then
-        print_info "$1 -> '$got'"
-        return 0
-    fi
-    print_error "$1 -> '$got' (expected '$2')"
-    return 1
+    expect_raw "$1" "$(rsp_exchange "$1")" "$2"
 }

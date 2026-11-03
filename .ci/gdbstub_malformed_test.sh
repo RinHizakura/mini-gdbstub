@@ -37,39 +37,34 @@ run_malformed_test()
 
     exec 3<> "/dev/tcp/127.0.0.1/$GDB_PORT"
 
-    local failed=0
-    expect_reply 'p' 'E16' || failed=1
-    expect_reply 'Pzz' 'E16' || failed=1
-    expect_reply 'P0' 'E16' || failed=1
-    expect_reply 'm0' 'E16' || failed=1
-    expect_reply 'm0,ffffffff' 'E16' || failed=1
-    expect_reply 'M0,4:00' 'E16' || failed=1
-    expect_reply 'X0,4:00' 'E16' || failed=1
-    expect_reply 'vCont' 'E16' || failed=1
-    expect_reply 'Hgx' 'E16' || failed=1 # not a hex thread id
-    expect_reply 'T2' 'E03' || failed=1  # emu has one CPU
-    expect_reply 'Z0,0' 'E16' || failed=1
-    expect_reply 'qXfer:features:read:target.xml:zz' 'E16' || failed=1
-    expect_reply 'qXfer:features:read:target.xml:ffff,10' 'l' || failed=1
-    expect_reply 'qXfer:features:read:other.xml:0,10' 'E00' || failed=1
+    expect_reply 'p' 'E16'
+    expect_reply 'Pzz' 'E16'
+    expect_reply 'P0' 'E16'
+    expect_reply 'm0' 'E16'
+    expect_reply 'm0,ffffffff' 'E16'
+    expect_reply 'M0,4:00' 'E16'
+    expect_reply 'X0,4:00' 'E16'
+    expect_reply 'vCont' 'E16'
+    expect_reply 'Hgx' 'E16' # not a hex thread id
+    expect_reply 'T2' 'E03'  # emu has one CPU
+    expect_reply 'Z0,0' 'E16'
+    expect_reply 'qXfer:features:read:target.xml:zz' 'E16'
+    expect_reply 'qXfer:features:read:target.xml:ffff,10' 'l'
+    expect_reply 'qXfer:features:read:other.xml:0,10' 'E00'
 
     # The stub must still be alive and answer a well-formed request
     local mem
     mem=$(rsp_exchange 'm0,4')
-    if [[ "$mem" =~ ^[0-9a-f]{8}$ ]] && kill -0 $emu_pid 2> /dev/null; then
-        print_info "stub still serves m0,4 -> '$mem'"
-    else
-        print_error "stub did not survive: m0,4 -> '$mem'"
-        failed=1
-    fi
+    expect_raw 'm0,4' "${#mem} hex digits" '8 hex digits'
+    kill -0 $emu_pid 2> /dev/null || RSP_FAILED=$((RSP_FAILED + 1))
 
     exec 3>&-
 
-    if [[ $failed -eq 0 ]]; then
+    if [[ $RSP_FAILED -eq 0 ]]; then
         test_pass "$TESTCASE ($ARCH)"
         return 0
     fi
-    test_fail "$TESTCASE" "Unexpected reply to a malformed packet"
+    test_fail "$TESTCASE" "$RSP_FAILED unexpected reply(ies) to malformed packets"
     print_error "Emulator output:"
     cat "$TMPFILE" >&2
     return 1

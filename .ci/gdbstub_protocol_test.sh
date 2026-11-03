@@ -26,17 +26,6 @@ cleanup_protocol_test()
     cleanup_test
 }
 
-# expect_raw <label> <raw reply> <glob pattern>
-expect_raw()
-{
-    if [[ "$2" == $3 ]]; then
-        print_info "$1 -> '$2'"
-        return 0
-    fi
-    print_error "$1 -> '$2' (expected $3)"
-    return 1
-}
-
 run_protocol_test()
 {
     init_test cleanup_protocol_test
@@ -56,39 +45,39 @@ run_protocol_test()
     fi
 
     exec 3<> "/dev/tcp/127.0.0.1/$GDB_PORT"
-    local failed=0 raw xml
+    local raw xml
 
     # Exactly one ack precedes a reply. PacketSize is hex; GDB sizes its
     # 'm' requests to half of it, so 0x7fd bytes must work and 0x7fe not.
     raw=$(rsp_exchange_raw 'qSupported:vContSupported+')
-    expect_raw 'qSupported' "$raw" '+$*PacketSize=ffa;*#??' || failed=1
+    expect_raw 'qSupported' "$raw" '+$*PacketSize=ffa;*#??'
     raw=$(rsp_exchange 'm0,7fd')
-    expect_raw 'm0,7fd' "${#raw} hex digits" '4090 hex digits' || failed=1
-    expect_reply 'm0,7fe' 'E16' || failed=1
+    expect_raw 'm0,7fd' "${#raw} hex digits" '4090 hex digits'
+    expect_reply 'm0,7fe' 'E16'
 
     # Thread ids are hex, start at 1, and 0 / -1 mean any / all
-    expect_reply '?' 'T05' || failed=1
-    expect_reply 'qfThreadInfo' 'm1' || failed=1
-    expect_reply 'qsThreadInfo' 'l' || failed=1
-    expect_reply 'qC' 'QC1' || failed=1
-    expect_reply 'Hg0' 'OK' || failed=1
-    expect_reply 'Hg1' 'OK' || failed=1
-    expect_reply 'Hg-1' 'OK' || failed=1
-    expect_reply 'Hc-1' 'OK' || failed=1
-    expect_reply 'T1' 'OK' || failed=1
+    expect_reply '?' 'T05'
+    expect_reply 'qfThreadInfo' 'm1'
+    expect_reply 'qsThreadInfo' 'l'
+    expect_reply 'qC' 'QC1'
+    expect_reply 'Hg0' 'OK'
+    expect_reply 'Hg1' 'OK'
+    expect_reply 'Hg-1' 'OK'
+    expect_reply 'Hc-1' 'OK'
+    expect_reply 'T1' 'OK'
 
     # qXfer data is binary-escaped, and a chunk never splits an escape pair
     xml="<target version=\"1.0\"><architecture>$(get_gdb_arch)</architecture></target>"
     expect_reply 'qXfer:features:read:target.xml:0,1000' \
-        $'l<!-- }\x03 }\x04 }] }\n -->'"$xml" || failed=1
-    expect_reply 'qXfer:features:read:target.xml:0,6' $'m<!-- }\x03' || failed=1
-    expect_reply 'qXfer:features:read:target.xml:6,2' $'m }\x04' || failed=1
+        $'l<!-- }\x03 }\x04 }] }\n -->'"$xml"
+    expect_reply 'qXfer:features:read:target.xml:0,6' $'m<!-- }\x03'
+    expect_reply 'qXfer:features:read:target.xml:6,2' $'m }\x04'
 
     # After QStartNoAckMode the stub stops acknowledging
     raw=$(rsp_exchange_raw 'QStartNoAckMode')
-    expect_raw 'QStartNoAckMode' "$raw" '+$OK#9a' || failed=1
+    expect_raw 'QStartNoAckMode' "$raw" '+$OK#9a'
     raw=$(rsp_exchange_raw '?')
-    expect_raw '? (no-ack)' "$raw" '$T05#b9' || failed=1
+    expect_raw '? (no-ack)' "$raw" '$T05#b9'
 
     # Ctrl-C while running stops with SIGINT, and '?' repeats that reply;
     # a step afterwards is an ordinary trap again
@@ -96,33 +85,33 @@ run_protocol_test()
     sleep 0.2
     printf '\003' >&3
     raw=$(rsp_recv)
-    expect_raw 'Ctrl-C' "$raw" '$T02#b6' || failed=1
-    expect_reply '?' 'T02' || failed=1
+    expect_raw 'Ctrl-C' "$raw" '$T02#b6'
+    expect_reply '?' 'T02'
 
     # The signal forms GDB sends once vCont is in use are accepted too
     rsp_send 'vCont;C05'
     sleep 0.2
     printf '\003' >&3
     raw=$(rsp_recv)
-    expect_raw 'vCont;C05 then Ctrl-C' "$raw" '$T02#b6' || failed=1
-    expect_reply 'vCont;S05' 'T05' || failed=1
-    expect_reply 'vCont;s' 'T05' || failed=1
-    expect_reply '?' 'T05' || failed=1
+    expect_raw 'vCont;C05 then Ctrl-C' "$raw" '$T02#b6'
+    expect_reply 'vCont;S05' 'T05'
+    expect_reply 'vCont;s' 'T05'
+    expect_reply '?' 'T05'
 
     # The X payload may carry escaped '#' (0x03 on the wire) without
     # being mistaken for an interrupt: the target must still be stopped
     raw=$(rsp_exchange_raw $'X10,2:}\x03}\x03')
-    expect_raw 'X with escaped #' "$raw" '$OK#9a' || failed=1
-    expect_reply 'm10,2' '2323' || failed=1
-    expect_reply '?' 'T05' || failed=1
+    expect_raw 'X with escaped #' "$raw" '$OK#9a'
+    expect_reply 'm10,2' '2323'
+    expect_reply '?' 'T05'
 
     exec 3>&-
 
-    if [[ $failed -eq 0 ]]; then
+    if [[ $RSP_FAILED -eq 0 ]]; then
         test_pass "$TESTCASE ($ARCH)"
         return 0
     fi
-    test_fail "$TESTCASE" "Protocol reply mismatch"
+    test_fail "$TESTCASE" "$RSP_FAILED protocol reply mismatch(es)"
     print_error "Emulator output:"
     cat "$TMPFILE" >&2
     return 1
