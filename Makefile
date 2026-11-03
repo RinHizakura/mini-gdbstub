@@ -84,8 +84,14 @@ $(TEST_PKTBUF): tests/test_pktbuf.c src/packet.c include/packet.h
 		-Wl,--wrap=realloc,--wrap=calloc \
 		tests/test_pktbuf.c src/packet.c -o $@
 
-check: $(TEST_PKTBUF)
+TEST_TRANSLATE = $(OUT)/test_translate
+$(TEST_TRANSLATE): tests/test_translate.c src/utils/translate.c include/utils/translate.h
+	$(CC) $(CFLAGS) -g -fsanitize=address,undefined \
+		tests/test_translate.c src/utils/translate.c -o $@
+
+check: $(TEST_PKTBUF) $(TEST_TRANSLATE)
 	$(TEST_PKTBUF)
+	$(TEST_TRANSLATE)
 
 clean:
 	$(RM) -r $(OUT)/emu

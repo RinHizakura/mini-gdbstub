@@ -20,44 +20,6 @@ TESTCASE="GDB Malformed Packet Test"
 source "$(dirname "$0")/test_common.sh"
 TMPFILE=$(create_temp_file "gdbstub_malformed_test")
 
-# RSP checksum: sum of the payload bytes modulo 256, as two hex digits
-rsp_csum()
-{
-    local s="$1" sum=0 i c
-    for ((i = 0; i < ${#s}; i++)); do
-        printf -v c '%d' "'${s:i:1}"
-        sum=$(((sum + c) & 0xff))
-    done
-    printf '%02x' "$sum"
-}
-
-# Send a packet and return the reply payload (without framing or acks)
-rsp_exchange()
-{
-    local payload="$1" reply="" ch
-    printf '$%s#%s' "$payload" "$(rsp_csum "$payload")" >&3
-    while IFS= read -r -t 3 -n1 ch <&3; do
-        reply+="$ch"
-        [[ "$reply" == *'#'?? ]] && break
-    done
-    printf '+' >&3
-    reply="${reply#*\$}" # drop the ack and the '$' framing
-    echo "${reply%#??}"
-}
-
-# expect_reply <packet> <expected reply>
-expect_reply()
-{
-    local got
-    got=$(rsp_exchange "$1")
-    if [[ "$got" == "$2" ]]; then
-        print_info "$1 -> '$got'"
-        return 0
-    fi
-    print_error "$1 -> '$got' (expected '$2')"
-    return 1
-}
-
 run_malformed_test()
 {
     init_test

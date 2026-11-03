@@ -165,6 +165,14 @@ run_arch_tests()
         ((failed++))
     fi
 
+    # Run protocol conformance test
+    print_step "Running protocol conformance test..."
+    if ARCH="$arch" "$SCRIPT_DIR/gdbstub_protocol_test.sh"; then
+        ((passed++))
+    else
+        ((failed++))
+    fi
+
     # Run single register write test
     print_step "Running single register write test..."
     if ARCH="$arch" "$SCRIPT_DIR/gdbstub_regwrite_single_test.sh"; then

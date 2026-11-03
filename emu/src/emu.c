@@ -590,6 +590,10 @@ struct target_ops emu_ops = {
     .on_interrupt = emu_on_interrupt,
 };
 
+/* The comment carries every character the stub has to escape in a qXfer
+ * reply, so the protocol test can watch the escaping on the wire */
+#define DESC_COMMENT "<!-- # $ } * -->"
+
 int main(int argc, char *argv[])
 {
     if (argc != 2) {
@@ -608,9 +612,9 @@ int main(int argc, char *argv[])
                           .smp = 1,
                           .reg_num = 33,
 #ifdef RV32
-                          .target_desc = TARGET_RV32,
+                          .target_desc = DESC_COMMENT TARGET_RV32,
 #else
-                          .target_desc = TARGET_RV64,
+                          .target_desc = DESC_COMMENT TARGET_RV64,
 #endif
                       },
                       "127.0.0.1:1234")) {

@@ -202,3 +202,64 @@ kill_prev_emulator()
     # the TIME_WAIT state can still cause transient bind failures).
     sleep 0.3
 }
+
+# --- Raw Remote Serial Protocol helpers; the socket is open on fd 3 ---
+
+# RSP checksum: sum of the payload bytes modulo 256, as two hex digits
+rsp_csum()
+{
+    local s="$1" sum=0 i c
+    for ((i = 0; i < ${#s}; i++)); do
+        printf -v c '%d' "'${s:i:1}"
+        sum=$(((sum + c) & 0xff))
+    done
+    printf '%02x' "$sum"
+}
+
+# Send one packet without waiting for a reply
+rsp_send()
+{
+    printf '$%s#%s' "$1" "$(rsp_csum "$1")" >&3
+}
+
+# Read until a packet ends ("#xx") or 3 s pass, then ack it. Returns the
+# raw bytes, acks included; -d '' keeps a newline byte (an escaped '*').
+rsp_recv()
+{
+    local reply="" ch
+    while IFS= read -r -t 3 -n1 -d '' ch <&3; do
+        reply+="$ch"
+        [[ "$reply" == *'#'?? ]] && break
+    done
+    printf '+' >&3
+    echo "$reply"
+}
+
+# Send a packet and return the raw reply
+rsp_exchange_raw()
+{
+    rsp_send "$1"
+    rsp_recv
+}
+
+# Send a packet and return the reply payload (without framing or acks)
+rsp_exchange()
+{
+    local raw
+    raw=$(rsp_exchange_raw "$1")
+    raw="${raw#*\$}"
+    echo "${raw%#??}"
+}
+
+# expect_reply <packet> <expected reply>
+expect_reply()
+{
+    local got
+    got=$(rsp_exchange "$1")
+    if [[ "$got" == "$2" ]]; then
+        print_info "$1 -> '$got'"
+        return 0
+    fi
+    print_error "$1 -> '$got' (expected '$2')"
+    return 1
+}

@@ -74,6 +74,9 @@ jobs:
       - name: Build libgdbstub
         run: make
 
+      - name: Run unit tests
+        run: make check
+
       - name: Build emulator (${{ matrix.arch }})
         run: |
           export PATH="/opt/riscv/${{ matrix.toolchain_arch }}/bin:$PATH"
@@ -151,6 +154,14 @@ jobs:
           export CROSS_COMPILE=${{ matrix.cross_compile }}
           ARCH=${{ matrix.arch }} .ci/gdbstub_detach_test.sh
 
+      - name: Run protocol conformance test
+        id: test-protocol
+        continue-on-error: true
+        run: |
+          export PATH="/opt/riscv/${{ matrix.toolchain_arch }}/bin:$PATH"
+          export CROSS_COMPILE=${{ matrix.cross_compile }}
+          ARCH=${{ matrix.arch }} .ci/gdbstub_protocol_test.sh
+
       - name: Test Summary
         if: always()
         run: |
@@ -167,6 +178,7 @@ jobs:
           echo "| Bulk Register Roundtrip | ${{ steps.test-regwrite-bulk-roundtrip.outcome == 'success' && 'PASSED' || 'FAILED' }} |" >> $GITHUB_STEP_SUMMARY
           echo "| No-Ack Mode | ${{ steps.test-noack.outcome == 'success' && 'PASSED' || 'FAILED' }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Detach | ${{ steps.test-detach.outcome == 'success' && 'PASSED' || 'FAILED' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Protocol Conformance | ${{ steps.test-protocol.outcome == 'success' && 'PASSED' || 'FAILED' }} |" >> $GITHUB_STEP_SUMMARY
 
       - name: Fail if any test failed
         if: always()
@@ -179,7 +191,8 @@ jobs:
              [[ "${{ steps.test-regwrite-bulk-reject.outcome }}" != "success" ]] || \
              [[ "${{ steps.test-regwrite-bulk-roundtrip.outcome }}" != "success" ]] || \
              [[ "${{ steps.test-noack.outcome }}" != "success" ]] || \
-             [[ "${{ steps.test-detach.outcome }}" != "success" ]]; then
+             [[ "${{ steps.test-detach.outcome }}" != "success" ]] || \
+             [[ "${{ steps.test-protocol.outcome }}" != "success" ]]; then
             echo "One or more tests failed"
             exit 1
           fi
