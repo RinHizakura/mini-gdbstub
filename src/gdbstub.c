@@ -628,9 +628,9 @@ static void process_general_set(gdbstub_t *gdbstub, char *payload)
 
 /* Process vCont action (single action only, no thread selectors)
  *
- * Currently supported:
- *   'c' - continue
- *   's' - step
+ * 'C sig' / 'S sig' are treated as 'c' / 's': a bare-metal target has no
+ * signals to deliver, and GDB only uses vCont at all when the stub accepts
+ * all four actions.
  *
  * TODO: Multi-action support (e.g., "c:all;s:tid") requires:
  * - Loop through ';'-separated actions
@@ -648,19 +648,20 @@ static inline gdb_event_t process_vcont(gdbstub_t *gdbstub, char *args)
 
     switch (args[0]) {
     case 'c':
+    case 'C':
         if (gdbstub->ops->cont != NULL)
             event = EVENT_CONT;
         else
             SEND_EPERM(gdbstub);
         break;
     case 's':
+    case 'S':
         if (gdbstub->ops->stepi != NULL)
             event = EVENT_STEP;
         else
             SEND_EPERM(gdbstub);
         break;
     default:
-        /* Reject unsupported actions (including 'C'/'S' with signal) */
         SEND_EPERM(gdbstub);
         break;
     }
@@ -668,30 +669,12 @@ static inline gdb_event_t process_vcont(gdbstub_t *gdbstub, char *args)
     return event;
 }
 
-#define VCONT_DESC "vCont;%s%s"
-
-/* Report vCont actions supported by this stub
- *
- * This stub advertises only 'c' (continue) and 's' (step), matching
- * the behavior of other hardware emulators.
- *
- * NOT advertised:
- * - 'C' (continue with signal) / 'S' (step with signal)
- *   Reason: Signal support is for process debugging, not hardware emulation
- *
- * - Thread selectors (e.g., "c:tid", "s:all")
- *   Reason: Current implementation processes single action only
- *   set_cpu() must be called separately via 'H' packet
- */
+/* GDB disables vCont unless c, C, s and S are all advertised, so only
+ * claim support when the target can both continue and step. */
 static inline void process_vcont_support(gdbstub_t *gdbstub)
 {
-    char packet_str[MAX_SEND_PACKET_SIZE];
-    /* Only advertise 'c' and 's' (no signal support for hardware emulation) */
-    char *str_s = (gdbstub->ops->stepi == NULL) ? "" : "s;";
-    char *str_c = (gdbstub->ops->cont == NULL) ? "" : "c;";
-    sprintf(packet_str, VCONT_DESC, str_s, str_c);
-
-    conn_send_pktstr(&gdbstub->priv->conn, packet_str);
+    bool ok = gdbstub->ops->cont != NULL && gdbstub->ops->stepi != NULL;
+    conn_send_pktstr(&gdbstub->priv->conn, ok ? "vCont;c;C;s;S" : "");
 }
 
 static gdb_event_t process_vpacket(gdbstub_t *gdbstub, char *payload)
